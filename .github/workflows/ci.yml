@@ -1,0 +1,26 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    uses: MRDonnii/ha-room-energy-optimizer/.github/workflows/ha-integration-ci.yml@main
+
+  gateway:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - name: Check gateway scripts
+        run: |
+          bash -n gateway/install.sh
+          python -m compileall -q gateway custom_components/hch_passivelink
