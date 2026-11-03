@@ -22,6 +22,7 @@ PASSIVE_BINARY_KEYS = {"fireplace", "standby"}
 class Coordinator:
     def __init__(self, *, controller: bool = True):
         self.available = True
+        self.client = None  # the HAC1 bus client; not an Mk2Client, so the MK1 entity set
         self.data = {}
         self.controller_state = {}
         self.controller_client = SimpleNamespace(connected=True) if controller else None

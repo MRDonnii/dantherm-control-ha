@@ -12,6 +12,14 @@ permissions:
 jobs:
   ci:
     uses: MRDonnii/ha-room-energy-optimizer/.github/workflows/ha-integration-ci.yml@main
+    with:
+      # pyserial ships with Home Assistant, so it is not in the manifest
+      extra-packages: pyserial
+      # The plain tests use asyncio.run(), which leaves no event loop for the
+      # Home Assistant pytest plugin, so the plugin tests run in their own call.
+      test-command: >-
+        python -m pytest -q -p no:cacheprovider -p no:homeassistant --ignore=tests/test_mk2_ha.py &&
+        python -m pytest -q -p no:cacheprovider -o asyncio_mode=auto tests/test_mk2_ha.py
 
   gateway:
     runs-on: ubuntu-latest
