@@ -15,7 +15,7 @@ from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DOMAIN
-from .entity import parent_link, sub_model
+from .entity import async_add_entities_when_ready, parent_link, sub_model
 from .controller_entity import ControllerEntity
 
 
@@ -82,4 +82,4 @@ async def async_setup_entry(
 ) -> None:
     coordinator = entry.runtime_data
     if coordinator.controller_client is not None:
-        async_add_entities([AfterheatClimate(coordinator)])
+        async_add_entities_when_ready(entry, coordinator, async_add_entities, [AfterheatClimate(coordinator)])
