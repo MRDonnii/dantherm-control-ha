@@ -79,6 +79,8 @@ class PassiveLinkCoordinator(DataUpdateCoordinator[dict[str, object]]):
         self._hac1_lost_since: float | None = None
         self._efficiency_reference: float | None = None
         self._filter_reset_history: list[float] = []
+        # Last value of the unit's filter counter, to tell a reset from a pause.
+        self._filter_unit_hours: int | None = None
 
     async def async_load_filter_state(self) -> None:
         """Load filter state before entities are created."""
@@ -90,6 +92,9 @@ class PassiveLinkCoordinator(DataUpdateCoordinator[dict[str, object]]):
             night_mode = stored.get("night_mode")
             efficiency_reference = stored.get("efficiency_reference")
             reset_history = stored.get("filter_reset_history")
+            unit_hours = stored.get("filter_unit_hours")
+            if isinstance(unit_hours, int):
+                self._filter_unit_hours = unit_hours
             if isinstance(night_mode, bool):
                 self._night_mode = night_mode
                 self.data["night_mode"] = night_mode
@@ -283,6 +288,8 @@ class PassiveLinkCoordinator(DataUpdateCoordinator[dict[str, object]]):
             data["efficiency_reference"] = self._efficiency_reference
         if self._filter_reset_history:
             data["filter_reset_history"] = self._filter_reset_history[-20:]
+        if self._filter_unit_hours is not None:
+            data["filter_unit_hours"] = self._filter_unit_hours
         if data:
             await self._filter_store.async_save(data)
 
@@ -341,6 +348,10 @@ class PassiveLinkCoordinator(DataUpdateCoordinator[dict[str, object]]):
         The counter is reset with the button on the unit, so a new start of its
         hour count is a filter change: it joins the history and re-arms the
         reminder, exactly like the reset button in Home Assistant.
+
+        The counter only runs while the fans do. A stop pauses it, which moves
+        the computed start of the cycle forward; that is not a filter change.
+        Only a counter that goes down is one.
         """
         hours, months = data.get("filter_unit_hours"), data.get("filter_unit_period_months")
         if not isinstance(hours, int) or not isinstance(months, int):
@@ -348,11 +359,15 @@ class PassiveLinkCoordinator(DataUpdateCoordinator[dict[str, object]]):
         reset = time.time() - hours * 3600
         interval = round(months * 730 / 24)
         changed = False
+        previous = self._filter_unit_hours
+        if previous is not None and hours < previous:
+            self._filter_reset_history.append(reset)
+            self._filter_reset_history = self._filter_reset_history[-20:]
+            self._filter_notification_reset_epoch = None
+        if hours != previous:
+            self._filter_unit_hours = hours
+            changed = True
         if self._filter_reset_epoch is None or abs(reset - self._filter_reset_epoch) > 2 * 3600:
-            if self._filter_reset_epoch is not None and reset > self._filter_reset_epoch:
-                self._filter_reset_history.append(reset)
-                self._filter_reset_history = self._filter_reset_history[-20:]
-                self._filter_notification_reset_epoch = None
             self._filter_reset_epoch = reset
             changed = True
         if interval != self._filter_interval_days:

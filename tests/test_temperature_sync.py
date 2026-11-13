@@ -149,6 +149,31 @@ class CoordinatorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(c.data["co2"], 900)
         self.assertEqual(c.data["supply_extract_delta"], 1.)
 
+    async def test_paused_filter_counter_is_not_a_filter_change(self):
+        cls = coordinator_class()
+        c = object.__new__(cls)
+        c.hass = SimpleNamespace(async_create_task=lambda coro: coro.close())
+        c._filter_reset_epoch = c._filter_interval_days = c._filter_unit_hours = None
+        c._filter_notification_reset_epoch = None
+        c._filter_reset_history = []
+        frame = {"filter_unit_hours": 4433, "filter_unit_period_months": 12}
+        start = 1_800_000_000.0
+        with patch("time.time", return_value=start):
+            c._sync_unit_filter(frame)
+        self.assertEqual(c._filter_reset_history, [start - 4433 * 3600])
+        # The fans stood still for 15 hours, so the counter did too.
+        with patch("time.time", return_value=start + 15 * 3600):
+            c._sync_unit_filter(frame)
+        self.assertEqual(len(c._filter_reset_history), 1)
+        self.assertEqual(c._filter_reset_epoch, start + 15 * 3600 - 4433 * 3600)
+        self.assertEqual(c._filter_unit_hours, 4433)
+        # The button on the unit starts the counter again.
+        with patch("time.time", return_value=start + 20 * 3600):
+            c._sync_unit_filter(dict(frame, filter_unit_hours=0))
+        self.assertEqual(c._filter_reset_history[-1], start + 20 * 3600)
+        self.assertEqual(len(c._filter_reset_history), 2)
+        self.assertEqual(c._filter_unit_hours, 0)
+
     async def test_failed_water_fetch_publishes_air_and_clears_old_water(self):
         cls = coordinator_class()
         c = object.__new__(cls)
