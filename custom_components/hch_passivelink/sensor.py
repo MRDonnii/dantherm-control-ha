@@ -111,6 +111,7 @@ CONTROLLER_SENSOR_SPECS = (
     ("hcp4_last_foreign_write_age", "Seneste HCP4-write", UnitOfTime.SECONDS, "mdi:timer-outline"),
     ("actual_fan_extract_percent", "Faktisk udsugning", PERCENTAGE, "mdi:fan"),
     ("actual_fan_supply_percent", "Faktisk indblæsning", PERCENTAGE, "mdi:fan"),
+    ("actual_unit_frost_supply_percent", "Frostsikring: indblæsning", PERCENTAGE, "mdi:fan-chevron-down"),
     ("actual_fan_extract_rpm", "Faktisk udsugning RPM", "rpm", "mdi:fan-speed-2"),
     ("actual_fan_supply_rpm", "Faktisk indblæsning RPM", "rpm", "mdi:fan-speed-2"),
     ("actual_afterheat_setpoint", "Faktisk eftervarme setpunkt", UnitOfTemperature.CELSIUS, "mdi:thermostat"),

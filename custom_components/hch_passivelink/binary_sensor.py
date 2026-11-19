@@ -48,6 +48,7 @@ CONTROLLER_BINARY_SPECS = (
     ("smart_inputs_online", "Smart Auto input online", BinarySensorDeviceClass.CONNECTIVITY, None, "mdi:home-assistant"),
     ("hardware_writes_allowed", "Pi hardware-writes tilladt", None, EntityCategory.DIAGNOSTIC, "mdi:shield-check-outline"),
     ("actual_afterheat", "Eftervarme faktisk aktiv", BinarySensorDeviceClass.HEAT, EntityCategory.DIAGNOSTIC, "mdi:radiator"),
+    ("actual_unit_frost_protection", "Anlæggets frostsikring aktiv", None, None, "mdi:snowflake-melt"),
 )
 
 

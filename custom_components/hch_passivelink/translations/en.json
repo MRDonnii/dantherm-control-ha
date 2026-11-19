@@ -25,7 +25,7 @@
       "relative_humidity": {"name": "Relative humidity"},
       "measured_relative_humidity": {"name": "Measured relative humidity"},
       "afterheat_setpoint": {"name": "Supply air setpoint"},
-      "heating_coil_before_temperature": {"name": "Air before heating coil"},
+      "heating_coil_before_temperature": {"name": "Frost sensor (water side)"},
       "heating_coil_after_temperature": {"name": "Air after heating coil"},
       "heating_coil_air_delta": {"name": "Air delta T across heating coil"},
       "afterheat_room_setpoint": {"name": "Room setpoint"},
