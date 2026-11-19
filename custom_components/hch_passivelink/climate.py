@@ -18,11 +18,14 @@ from .const import DOMAIN
 from .entity import parent_link, sub_model
 from .controller_entity import ControllerEntity
 
+# HA 2026.11 renamed the climate temperature API to native_*; the old names
+# warn and stop working in 2027.11. Older HA (>= 2025.8) only knows the old ones.
+_NATIVE_API = hasattr(ClimateEntity, "native_current_temperature")
+
 
 class AfterheatClimate(ControllerEntity, ClimateEntity):
     """Supply-air afterheat thermostat backed by the Pi controller API."""
 
-    _attr_temperature_unit = UnitOfTemperature.CELSIUS
     _attr_hvac_modes = [HVACMode.HEAT, HVACMode.OFF]
     _attr_supported_features = ClimateEntityFeature.TARGET_TEMPERATURE
     _attr_min_temp = 10
@@ -40,8 +43,7 @@ class AfterheatClimate(ControllerEntity, ClimateEntity):
             **parent_link(coordinator),
         )
 
-    @property
-    def target_temperature(self) -> float | None:
+    def _target_temperature(self) -> float | None:
         value = self.coordinator.controller_state.get("afterheat_setpoint")
         return float(value) if isinstance(value, (int, float)) else None
 
@@ -49,13 +51,21 @@ class AfterheatClimate(ControllerEntity, ClimateEntity):
     def hvac_mode(self) -> HVACMode:
         return HVACMode.HEAT if self.coordinator.controller_state.get("afterheat_enabled") is not False else HVACMode.OFF
 
-    @property
-    def current_temperature(self) -> float | None:
+    def _current_temperature(self) -> float | None:
         state = self.coordinator.controller_state
         value = state.get("actual_supply_air_temperature")
         if not isinstance(value, (int, float)):
             value = self.coordinator.data.get("heating_coil_after_temperature")
         return float(value) if isinstance(value, (int, float)) else None
+
+    if _NATIVE_API:
+        _attr_native_temperature_unit = UnitOfTemperature.CELSIUS
+        native_target_temperature = property(_target_temperature)
+        native_current_temperature = property(_current_temperature)
+    else:
+        _attr_temperature_unit = UnitOfTemperature.CELSIUS
+        target_temperature = property(_target_temperature)
+        current_temperature = property(_current_temperature)
 
     @property
     def hvac_action(self) -> HVACAction:
