@@ -210,3 +210,41 @@ def test_missing_hrc2_t5_is_not_a_room_temperature():
     words[4] = 0x7FFF
     decoder.decode(frame(bytes([0x40, 3, 60]) + b"".join(w.to_bytes(2, "big") for w in words)))
     assert derive_alarm_values(decoder.data)["room_temperature_sensor_fault"] is True
+
+
+def test_hac1_205_206_glitch_is_hidden_by_the_window_minimum(monkeypatch):
+    import parser as parser_module
+
+    clock = {"now": 1000.0}
+    monkeypatch.setattr(parser_module.time, "monotonic", lambda: clock["now"])
+    decoder = DanthermDecoder(lambda _: None)
+    shown = []
+    for at, t2ah, frost in [(0, 21.1, 18.1), (3, 30.8, 23.8), (6, 30.8, 23.8), (9, 21.1, 18.0)]:
+        clock["now"] = 1000.0 + at
+        decoder._set(heating_coil_after_temperature=t2ah, heating_coil_before_temperature=frost)
+        shown.append((decoder.data["heating_coil_after_temperature"], decoder.data["heating_coil_before_temperature"]))
+    assert shown == [(21.1, 18.1), (21.1, 18.1), (21.1, 18.1), (21.1, 18.0)]
+    # A real drop shows at once; readings older than 15 s no longer count.
+    clock["now"] = 1012.0
+    decoder._set(heating_coil_before_temperature=9.0)
+    assert decoder.data["heating_coil_before_temperature"] == 9.0
+    clock["now"] = 1030.0
+    decoder._set(heating_coil_after_temperature=24.0)
+    assert decoder.data["heating_coil_after_temperature"] == 24.0
+
+
+def test_snapshot_mode_uses_the_205_block_readings_in_the_window(monkeypatch):
+    import parser as parser_module
+
+    clock = {"now": 2000.0}
+    monkeypatch.setattr(parser_module.time, "monotonic", lambda: clock["now"])
+    decoder = DanthermDecoder(lambda _: None)
+    decoder._snapshot_mode = True
+    # 205-block readings every 3 s are only observed; a later lone snapshot glitch
+    # (the previous snapshot was missed) is still hidden by them.
+    for at in (0, 3, 6, 9):
+        clock["now"] = 2000.0 + at
+        decoder._observe_for_filter("heating_coil_after_temperature", 21.1)
+    clock["now"] = 2012.0
+    decoder._set(heating_coil_after_temperature=30.8)
+    assert decoder.data["heating_coil_after_temperature"] == 21.1

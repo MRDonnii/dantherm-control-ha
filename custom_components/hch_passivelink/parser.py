@@ -37,6 +37,11 @@ def crc16(data: bytes) -> int:
     return crc
 
 
+# HAC1 register 205 (air after the coil) and 206 (water-side frost sensor).
+SPIKE_FILTER_KEYS = ("heating_coil_after_temperature", "heating_coil_before_temperature")
+SPIKE_WINDOW_SECONDS = 15.0
+
+
 class RtuStreamParser:
     """Reassemble verified RTU frames from arbitrary TCP chunks."""
 
@@ -115,9 +120,41 @@ class DanthermDecoder:
         self._snapshot_mode = False
         self._snapshot_at = 0.0
         self._snapshot_request_at: float | None = None
+        self._spike_window: dict[str, list[tuple[float, float]]] = {}
+
+    def _observe_for_filter(self, key: str, value: object) -> None:
+        """Add a reading to the glitch window without publishing it.
+
+        In snapshot mode the 3 s 205-block readings are not published (the
+        snapshot is), but they still belong in the window so one missed
+        snapshot cannot leave a glitch alone in it.
+        """
+        if key in SPIKE_FILTER_KEYS and isinstance(value, (int, float)) and not isinstance(value, bool):
+            now = time.monotonic()
+            window = [(at, reading) for at, reading in self._spike_window.get(key, [])
+                      if 0 <= now - at <= SPIKE_WINDOW_SECONDS]
+            window.append((now, float(value)))
+            self._spike_window[key] = window
+
+    def _without_glitch(self, key: str, value: object) -> object:
+        """HAC1 205/206 can read several degrees too warm for 3-9 s (always
+        upward). Publish the lowest reading of the last SPIKE_WINDOW_SECONDS,
+        the same filter the Pi controller applies (gateway 1.8.1+)."""
+        if key not in SPIKE_FILTER_KEYS:
+            return value
+        if not isinstance(value, (int, float)) or isinstance(value, bool):
+            self._spike_window.pop(key, None)
+            return value
+        now = time.monotonic()
+        window = [(at, reading) for at, reading in self._spike_window.get(key, [])
+                  if 0 <= now - at <= SPIKE_WINDOW_SECONDS]
+        window.append((now, float(value)))
+        self._spike_window[key] = window
+        return min(reading for _at, reading in window)
 
     def _set(self, **values: object) -> None:
         changed = False
+        values = {key: self._without_glitch(key, value) for key, value in values.items()}
         for key, value in values.items():
             if self.data.get(key) != value:
                 self.data[key] = value
@@ -258,6 +295,9 @@ class DanthermDecoder:
                 # antifrost/frostsikringsføler på vandsiden (retur). Der
                 # findes derfor ingen gyldig luft-ΔT over fladen fra disse
                 # to registre.
+                if self._snapshot_mode:
+                    self._observe_for_filter("heating_coil_after_temperature", temperature_value(values[0]))
+                    self._observe_for_filter("heating_coil_before_temperature", temperature_value(values[1]))
                 self._set(
                     **({} if self._snapshot_mode else {
                         "heating_coil_after_temperature": temperature_value(values[0]),
