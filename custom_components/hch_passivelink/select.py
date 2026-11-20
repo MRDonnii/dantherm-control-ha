@@ -4,9 +4,11 @@ from __future__ import annotations
 from homeassistant.components.select import SelectEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .controller_entity import ControllerEntity
+from .controller_entity import AFTERHEAT_CONTROL_KEY, AfterheatControlEntity, ControllerEntity
+from .entity import async_add_entities_when_ready
 from .mk2_entities import Mk2LevelSelect, Mk2OperationSelect, is_direct_mk2
 
 
@@ -152,6 +154,31 @@ class StandbyDurationSelect(ControllerEntity, SelectEntity):
         await self.async_command({"standby_minutes": STANDBY_OPTIONS[option]})
 
 
+class AfterheatControlModeSelect(AfterheatControlEntity, SelectEntity):
+    """Pi regulates the HAC1 afterheat level, or HAC1 regulates on its own (HCH5 Control 1.9.0+).
+
+    The options are the Pi's own values; the translations show them as Pi / HAC1.
+    """
+
+    _attr_options = ["pi", "native"]
+    _attr_icon = "mdi:tune-variant"
+    _attr_entity_category = EntityCategory.CONFIG
+    _attr_translation_key = "afterheat_control_mode"
+
+    def __init__(self, coordinator) -> None:
+        super().__init__(coordinator, AFTERHEAT_CONTROL_KEY, "Eftervarme regulering")
+
+    @property
+    def current_option(self) -> str | None:
+        value = self.controller_value
+        return value if value in self._attr_options else None
+
+    async def async_select_option(self, option: str) -> None:
+        if option not in self._attr_options:
+            raise ValueError(f"Unsupported afterheat control mode: {option}")
+        await self.async_command({AFTERHEAT_CONTROL_KEY: option})
+
+
 async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
@@ -160,7 +187,7 @@ async def async_setup_entry(
         async_add_entities([Mk2OperationSelect(coordinator), Mk2LevelSelect(coordinator)])
     if coordinator.controller_client is None:
         return
-    async_add_entities([
+    async_add_entities_when_ready(entry, coordinator, async_add_entities, [
         ControllerSelect(
             coordinator,
             "mode",
@@ -174,4 +201,5 @@ async def async_setup_entry(
         BonfireDurationSelect(coordinator),
         StandbyDurationSelect(coordinator),
         ControllerSelect(coordinator, "balance_ratio_mode", "Luftbalance kanalforhold", ["auto", "fixed"]),
+        AfterheatControlModeSelect(coordinator),
     ])

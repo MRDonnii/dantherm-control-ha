@@ -8,6 +8,10 @@ While the Pi reports the afterheat frost lock (HCH5 Control with
 ``afterheat_frost_lock``), the water coil in the attic must stay on: the entity
 then offers only HEAT and no setpoint below the Pi's frost floor. Older Pi
 firmware without these keys keeps the plain HEAT/OFF thermostat.
+
+HCH5 Control 1.9.0+ also reports the HAC1 afterheat level (0..10) and who
+regulates it; the attributes ``hac1_level``, ``level_wanted`` and
+``control_reason`` carry it to the HCH5 card and are absent on older firmware.
 """
 from __future__ import annotations
 
@@ -24,7 +28,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DOMAIN
 from .entity import parent_link, sub_model
-from .controller_entity import ControllerEntity
+from .controller_entity import ControllerEntity, has_afterheat_control
 
 # HA 2026.11 renamed the climate temperature API to native_*; the old names
 # warn and stop working in 2027.11. Older HA (>= 2025.8) only knows the old ones.
@@ -45,6 +49,14 @@ class AfterheatClimate(ControllerEntity, ClimateEntity):
     _attr_max_temp = 35
     _attr_target_temperature_step = 1
     _attr_icon = "mdi:radiator"
+    # The HAC1 level attributes are for the live card; the level, wanted level,
+    # target and reason are recorded by their own sensors. The wanted level and
+    # the reason text change on almost every poll, so keep them out of the
+    # recorder here instead of writing a new attributes row every 5 s.
+    _unrecorded_attributes = frozenset({
+        "hac1_level", "level_wanted", "level_target", "level_max",
+        "control_active", "control_reason", "control_target",
+    })
 
     def __init__(self, coordinator) -> None:
         super().__init__(coordinator, "afterheat_setpoint", "Eftervarme")
@@ -86,14 +98,26 @@ class AfterheatClimate(ControllerEntity, ClimateEntity):
     @property
     def extra_state_attributes(self) -> dict[str, object] | None:
         state = self.coordinator.controller_state
-        if "afterheat_frost_lock" not in state:
-            return None
-        return {
-            "frost_lock": state.get("afterheat_frost_lock") is True,
-            "frost_lock_reason": state.get("afterheat_frost_lock_reason"),
-            "frost_lock_floor": self.frost_lock_floor,
-            "frost_lock_enforced": state.get("afterheat_frost_lock_enforced"),
-        }
+        attributes: dict[str, object] = {}
+        if "afterheat_frost_lock" in state:
+            attributes.update({
+                "frost_lock": state.get("afterheat_frost_lock") is True,
+                "frost_lock_reason": state.get("afterheat_frost_lock_reason"),
+                "frost_lock_floor": self.frost_lock_floor,
+                "frost_lock_enforced": state.get("afterheat_frost_lock_enforced"),
+            })
+        if has_afterheat_control(state):
+            # HCH5 Control 1.9.0+: the HAC1 level for the HCH5 card ("Trin N/10").
+            attributes.update({
+                "hac1_level": state.get("afterheat_level"),
+                "level_wanted": state.get("afterheat_level_wanted"),
+                "level_target": state.get("afterheat_level_target"),
+                "level_max": state.get("afterheat_level_max"),
+                "control_active": state.get("afterheat_control_active"),
+                "control_reason": state.get("afterheat_control_reason"),
+                "control_target": state.get("afterheat_target"),
+            })
+        return attributes or None
 
     def _current_temperature(self) -> float | None:
         state = self.coordinator.controller_state

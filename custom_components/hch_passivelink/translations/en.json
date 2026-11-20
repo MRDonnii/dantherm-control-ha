@@ -11,7 +11,7 @@
     "abort": {"already_configured": "This gateway is already configured."}
   },
   "entity": {
-    "select": {"mk2_operation": {"name": "Operation mode", "state": {"standby": "Standby", "manual": "Manual", "automatic": "Automatic", "week_program": "Week program", "away": "Away", "summer": "Summer", "fireplace": "Fireplace"}}, "mk2_fan_level": {"name": "Fan step"}},
+    "select": {"mk2_operation": {"name": "Operation mode", "state": {"standby": "Standby", "manual": "Manual", "automatic": "Automatic", "week_program": "Week program", "away": "Away", "summer": "Summer", "fireplace": "Fireplace"}}, "mk2_fan_level": {"name": "Fan step"}, "afterheat_control_mode": {"name": "Afterheat regulation", "state": {"pi": "Pi", "native": "HAC1"}}},
     "switch": {"mk2_bypass": {"name": "Bypass (manual)"}},
     "sensor": {
       "mk2_alarm": {"name": "Alarm", "state": {"none": "None", "exhaust_air_fan": "Exhaust air fan", "supply_air_fan": "Supply air fan", "bypass_damper": "Bypass damper", "outdoor_air_sensor": "Outdoor air sensor (T1)", "supply_air_sensor": "Supply air sensor (T2)", "extract_air_sensor": "Extract air sensor (T3)", "exhaust_air_sensor": "Exhaust air sensor (T4)", "room_air_sensor": "Room sensor (T5)", "humidity_sensor": "Humidity sensor", "outdoor_temperature": "Outdoor temperature", "supply_temperature": "Supply temperature", "overtemperature": "Overtemperature", "communication_error": "Communication error", "fire": "Fire", "high_water_level": "High water level", "fire_protection": "Fire protection"}},
@@ -70,7 +70,11 @@
       "pi_disk_used_percent": {"name": "Disk used"},
       "pi_core_voltage": {"name": "Core voltage"},
       "pi_model": {"name": "Model"},
-      "pi_kernel_version": {"name": "Kernel version"}
+      "pi_kernel_version": {"name": "Kernel version"},
+      "afterheat_level": {"name": "Afterheat level"},
+      "afterheat_level_wanted": {"name": "Afterheat wanted level"},
+      "afterheat_target": {"name": "Afterheat target"},
+      "afterheat_control_reason": {"name": "Afterheat control"}
     },
     "binary_sensor": {
       "bypass_active": {"name": "Bypass active"},

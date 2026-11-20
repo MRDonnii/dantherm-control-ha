@@ -77,3 +77,33 @@ class ControllerEntity(CoordinatorEntity):
             raise ServiceValidationError(str(error)) from error
         except (OSError, ClientError, ConnectionError, asyncio.TimeoutError) as error:
             raise HomeAssistantError(f"Dantherm Control svarer ikke: {error}") from error
+
+
+# HCH5 Control 1.9.0+: the Pi can regulate the HAC1 afterheat level itself.
+# Older firmware never reports this key; its entities are then never created.
+AFTERHEAT_CONTROL_KEY = "afterheat_control_mode"
+
+
+def has_afterheat_control(state: dict) -> bool:
+    return AFTERHEAT_CONTROL_KEY in state
+
+
+class AfterheatControlEntity(ControllerEntity):
+    """Afterheat level regulation (Pi or HAC1); created once the Pi reports it.
+
+    Its values may be null for a while (stale level, native mode), which shows
+    as unknown rather than unavailable.
+    """
+
+    @property
+    def available(self) -> bool:
+        client = getattr(self.coordinator, "controller_client", None)
+        return bool(client and client.connected and has_afterheat_control(self.coordinator.controller_state))
+
+    @property
+    def defer_until_data(self) -> bool:
+        return True
+
+    @property
+    def has_data(self) -> bool:
+        return has_afterheat_control(self.coordinator.controller_state)

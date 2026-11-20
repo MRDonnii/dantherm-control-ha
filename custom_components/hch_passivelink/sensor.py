@@ -1,5 +1,6 @@
 """Sensors for Dantherm Control."""
 
+import math
 from dataclasses import dataclass
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntity, SensorEntityDescription, SensorStateClass
 from homeassistant.config_entries import ConfigEntry
@@ -22,7 +23,7 @@ from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
 
-from .controller_entity import ControllerEntity
+from .controller_entity import AfterheatControlEntity, ControllerEntity
 from .coordinator import PassiveLinkCoordinator
 from .entity import PI_KEYS, PREHEATER_KEYS, PassiveLinkEntity, async_add_entities_when_ready
 from .mk2_entities import Mk2AlarmSensor, Mk2OperatingHoursSensor, drop_mk1_only, is_mk2
@@ -203,6 +204,83 @@ class BalanceStatusSensor(ControllerEntity, SensorEntity):
         }
 
 
+def _number(value) -> float | None:
+    # Python's JSON parser accepts NaN/Infinity; they must not crash int(round()).
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+        return None
+    return float(value)
+
+
+# (key, name, unit, icon, decimals) for the afterheat level regulation (HCH5 Control 1.9.0+).
+AFTERHEAT_LEVEL_SENSOR_SPECS = (
+    ("afterheat_level", "Eftervarme trin", None, "mdi:stairs", 0),
+    ("afterheat_level_wanted", "Eftervarme mål-trin", None, "mdi:stairs-up", 1),
+    ("afterheat_target", "Eftervarme mål", UnitOfTemperature.CELSIUS, "mdi:thermometer-auto", 1),
+)
+
+
+class AfterheatLevelSensor(AfterheatControlEntity, SensorEntity):
+    """HAC1 afterheat level 0..10, the wanted (continuous) level and the target in °C."""
+
+    _attr_state_class = SensorStateClass.MEASUREMENT
+
+    def __init__(self, coordinator, key: str, name: str, unit, icon: str, decimals: int) -> None:
+        super().__init__(coordinator, key, name)
+        self._attr_translation_key = key
+        self._attr_native_unit_of_measurement = unit
+        self._attr_icon = icon
+        self._decimals = decimals
+        if unit == UnitOfTemperature.CELSIUS:
+            self._attr_device_class = SensorDeviceClass.TEMPERATURE
+            self._attr_suggested_display_precision = decimals
+
+    @property
+    def native_value(self):
+        value = _number(self.controller_value)
+        if value is None:
+            return None
+        return int(round(value)) if self._decimals == 0 else round(value, self._decimals)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, object] | None:
+        if self.key != "afterheat_level":
+            return None
+        state = self.coordinator.controller_state
+        return {"level_max": state.get("afterheat_level_max"), "level_target": state.get("afterheat_level_target")}
+
+
+class AfterheatControlSensor(AfterheatControlEntity, SensorEntity):
+    """Who regulates the afterheat and why, as the Pi's own short Danish text."""
+
+    _attr_icon = "mdi:radiator"
+    # The countdown and the error change on every poll; keep them out of the recorder
+    # (the error is T2AH minus the target, both recorded as their own sensors).
+    _unrecorded_attributes = frozenset({"next_tick_seconds", "control_error"})
+
+    def __init__(self, coordinator) -> None:
+        super().__init__(coordinator, "afterheat_control_reason", "Eftervarme styring")
+        self._attr_translation_key = "afterheat_control_reason"
+
+    @property
+    def native_value(self):
+        value = self.controller_value
+        # A sensor state holds at most 255 characters.
+        return str(value)[:255] if value is not None else None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, object]:
+        state = self.coordinator.controller_state
+        return {
+            "control_mode": state.get("afterheat_control_mode"),
+            "control_active": state.get("afterheat_control_active"),
+            "next_action": state.get("afterheat_next_action"),
+            "next_tick_seconds": state.get("afterheat_next_tick_seconds"),
+            "hac1_setpoint": state.get("afterheat_hac1_setpoint"),
+            "level_target": state.get("afterheat_level_target"),
+            "control_error": state.get("afterheat_control_error"),
+        }
+
+
 class PassiveLinkSensor(PassiveLinkEntity, SensorEntity, RestoreEntity):
     def __init__(self, coordinator: PassiveLinkCoordinator, description: Description) -> None:
         super().__init__(coordinator, description.key)
@@ -349,4 +427,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
             BalanceStatusSensor(coordinator, "balance_duct_ratio_in_use", "Luftbalance kanalforhold i brug", "mdi:pipe"),
             BalanceStatusSensor(coordinator, "balance_heat_balance", "Luftbalance varmebalance", "mdi:heat-wave"),
         ])
+        entities.extend(
+            AfterheatLevelSensor(coordinator, *spec) for spec in AFTERHEAT_LEVEL_SENSOR_SPECS
+        )
+        entities.append(AfterheatControlSensor(coordinator))
     async_add_entities_when_ready(entry, coordinator, async_add_entities, entities)
