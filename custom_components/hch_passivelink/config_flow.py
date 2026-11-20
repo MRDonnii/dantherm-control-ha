@@ -12,7 +12,7 @@ from homeassistant.helpers import selector
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .client import Mk2Client, PassiveLinkClient, PassiveSerialClient
-from .controller_api import ControllerApiClient
+from .controller_api import ControllerApiClient, ControllerRejectedError
 from .sensor_support import (
     KIND_CO2,
     KIND_ENERGY,
@@ -516,12 +516,17 @@ class PassiveLinkOptionsFlow(config_entries.OptionsFlow):
 
     async def async_step_controller_settings(self, user_input: dict | None = None) -> FlowResult:
         errors = {}
+        # The Pi's own reason when it refuses a value (e.g. the afterheat frost lock).
+        placeholders = {"error": ""}
         state = self._controller_state
         if user_input is not None:
             try:
                 if self._controller_client is None:
                     raise ConnectionError("Controller API is not connected")
                 self._controller_state = await self._controller_client.async_command(dict(user_input))
+            except ControllerRejectedError as error:
+                errors["base"] = "controller_rejected"
+                placeholders["error"] = str(error)
             except (OSError, ConnectionError, asyncio.TimeoutError):
                 errors["base"] = "controller_update_failed"
             else:
@@ -555,7 +560,8 @@ class PassiveLinkOptionsFlow(config_entries.OptionsFlow):
             vol.Required("afterheat_setpoint", default=state.get("afterheat_setpoint", 20)): number(18, 30),
         })
         return self.async_show_form(
-            step_id="controller_settings", data_schema=schema, errors=errors
+            step_id="controller_settings", data_schema=schema, errors=errors,
+            description_placeholders=placeholders,
         )
 
     async def async_step_fan_profiles(self, user_input: dict | None = None) -> FlowResult:

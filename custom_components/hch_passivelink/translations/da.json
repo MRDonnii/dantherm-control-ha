@@ -212,6 +212,7 @@
       "cannot_connect": "Forbindelsen kunne ikke valideres, eller der blev ikke modtaget gyldig Dantherm-trafik.",
       "controller_cannot_connect": "Controller API kunne ikke kontaktes eller godkende tokenet.",
       "controller_update_failed": "Controlleren afviste ændringen, eller forbindelsen blev afbrudt.",
+      "controller_rejected": "Controlleren afviste ændringen: {error}",
       "required": "Feltet skal udfyldes for den valgte forbindelsestype.",
       "room_name_duplicate": "Der findes allerede et Smart Auto-rum med dette navn.",
       "room_requires_sensor": "Vælg mindst én sensor til rummet.",
@@ -221,5 +222,10 @@
   "issues": {
     "connection_lost": {"title": "Ingen forbindelse til gatewayen eller anlægget", "description": "Dantherm Control har ikke kunnet forbinde til den konfigurerede RS485-gateway eller Modbus TCP-enhed i mere end 15 minutter. Kontrollér strøm og netværk, og at den transparente TCP-strøm eller Modbus TCP stadig er aktiv. Åbn integrationens indstillinger, hvis adressen har ændret sig."},
     "hac1_disconnected": {"title": "HAC1-indeklimamodulet svarer ikke", "description": "Der er stadig RS485-trafik fra Dantherm-anlægget, men HAC1-modulet (CO₂/indeklima) har ikke rapporteret sig som forbundet i mere end 15 minutter. Kontrollér HAC1-modulets kabling og strøm."}
+  },
+  "exceptions": {
+    "afterheat_frost_locked": {"message": "Frostsikring: eftervarmen kan ikke slukkes, mens det fryser."},
+    "afterheat_frost_floor": {"message": "Frostsikring: eftervarmen kan ikke sættes under {floor} °C, mens det fryser."},
+    "cool_boost_frost_locked": {"message": "Frostsikring: Køl kan ikke startes, mens det fryser."}
   }
 }

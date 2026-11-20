@@ -3,9 +3,11 @@
 from homeassistant.components.button import ButtonEntity, ButtonEntityDescription
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
+from .const import DOMAIN
 from .entity import PassiveLinkEntity
 from .controller_entity import ControllerEntity
 from .mk2_entities import Mk2AlarmResetButton, Mk2FilterResetButton, is_direct_mk2
@@ -56,7 +58,11 @@ COOL_BOOST_NAMES = {30: "Køl 30 min", 60: "Køl 1 time", 120: "Køl 2 timer", 0
 
 
 class CoolBoostButton(ControllerEntity, ButtonEntity):
-    """Køl: bypass open, top step and afterheat held down for a while (HCH5 Control 1.5.0+)."""
+    """Køl: bypass open, top step and afterheat held down for a while (HCH5 Control 1.5.0+).
+
+    Starting Køl is blocked while the Pi's afterheat frost lock is on; "Stop køl"
+    always stays available.
+    """
 
     _attr_icon = "mdi:snowflake-alert"
 
@@ -67,9 +73,13 @@ class CoolBoostButton(ControllerEntity, ButtonEntity):
     @property
     def available(self) -> bool:
         client = getattr(self.coordinator, "controller_client", None)
-        return bool(client and client.connected)
+        if not (client and client.connected):
+            return False
+        return self.minutes == 0 or not self.frost_lock
 
     async def async_press(self) -> None:
+        if self.minutes > 0 and self.frost_lock:
+            raise ServiceValidationError(translation_domain=DOMAIN, translation_key="cool_boost_frost_locked")
         await self.async_command({"cool_boost_minutes": self.minutes})
 
 

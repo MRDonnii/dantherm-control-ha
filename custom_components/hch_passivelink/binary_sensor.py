@@ -75,6 +75,30 @@ class ControllerStatusBinarySensor(ControllerEntity, BinarySensorEntity):
         return bool(value) if value is not None else None
 
 
+class AfterheatFrostLockBinarySensor(ControllerStatusBinarySensor):
+    """On while the Pi keeps the attic afterheat coil from being switched off.
+
+    Created only once a Pi that knows the frost lock reports it, so older
+    firmware does not get a permanently unavailable entity.
+    """
+
+    def __init__(self, coordinator) -> None:
+        super().__init__(coordinator, "afterheat_frost_lock", "Eftervarme frostlås", None, None, "mdi:snowflake-lock")
+
+    @property
+    def defer_until_data(self) -> bool:
+        return True
+
+    @property
+    def extra_state_attributes(self) -> dict[str, object]:
+        state = self.coordinator.controller_state
+        return {
+            "reason": state.get("afterheat_frost_lock_reason"),
+            "floor": self.frost_lock_floor,
+            "enforced": state.get("afterheat_frost_lock_enforced"),
+        }
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback) -> None:
     coordinator = entry.runtime_data
     entities = [
@@ -89,4 +113,5 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
             ControllerStatusBinarySensor(coordinator, key, name, device_class, category, icon)
             for key, name, device_class, category, icon in CONTROLLER_BINARY_SPECS
         )
+        entities.append(AfterheatFrostLockBinarySensor(coordinator))
     async_add_entities_when_ready(entry, coordinator, async_add_entities, entities)

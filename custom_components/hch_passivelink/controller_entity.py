@@ -1,10 +1,15 @@
 """Base entities for the Raspberry Pi controller (Dantherm Control)."""
 from __future__ import annotations
 
+import asyncio
+
+from aiohttp import ClientError
+from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import CONTROLLER_DEVICE_NAME, DOMAIN
+from .controller_api import ControllerRejectedError
 from .entity import OPTIONAL_CONTROLLER_KEYS, parent_link
 
 
@@ -52,5 +57,23 @@ class ControllerEntity(CoordinatorEntity):
     def has_data(self) -> bool:
         return self.controller_value is not None
 
+    @property
+    def frost_lock(self) -> bool:
+        """Afterheat frost lock reported by the Pi (False on firmware without it)."""
+        return self.coordinator.controller_state.get("afterheat_frost_lock") is True
+
+    @property
+    def frost_lock_floor(self) -> float | None:
+        value = self.coordinator.controller_state.get("afterheat_frost_lock_floor")
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return None
+        return float(value)
+
     async def async_command(self, patch: dict[str, object]) -> None:
-        await self.coordinator.async_controller_command(patch)
+        """Send a patch to the Pi; its own rejection text reaches the user as is."""
+        try:
+            await self.coordinator.async_controller_command(patch)
+        except ControllerRejectedError as error:
+            raise ServiceValidationError(str(error)) from error
+        except (OSError, ClientError, ConnectionError, asyncio.TimeoutError) as error:
+            raise HomeAssistantError(f"Dantherm Control svarer ikke: {error}") from error

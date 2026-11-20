@@ -212,6 +212,7 @@
       "cannot_connect": "The connection could not be validated, or no valid Dantherm traffic was received.",
       "controller_cannot_connect": "The controller API could not be reached or the token could not be authenticated.",
       "controller_update_failed": "The controller rejected the change or the connection was interrupted.",
+      "controller_rejected": "The controller rejected the change: {error}",
       "required": "This field is required for the selected connection type.",
       "room_name_duplicate": "A Smart Auto room with this name already exists.",
       "room_requires_sensor": "Select at least one sensor for the room.",
@@ -221,5 +222,10 @@
   "issues": {
     "connection_lost": {"title": "No connection to the gateway or unit", "description": "Dantherm Control has been unable to connect to the configured RS485 gateway or Modbus TCP unit for more than 15 minutes. Check its power and network connection, and that the transparent TCP stream or Modbus TCP is still active. Open the integration's options if the address has changed."},
     "hac1_disconnected": {"title": "HAC1 indoor-climate module not responding", "description": "RS485 traffic from the Dantherm unit is still present, but the HAC1 module (CO2/indoor climate) has not reported itself as connected for more than 15 minutes. Check the HAC1 module's wiring and power."}
+  },
+  "exceptions": {
+    "afterheat_frost_locked": {"message": "Frost protection: the afterheat cannot be switched off while it is freezing."},
+    "afterheat_frost_floor": {"message": "Frost protection: the afterheat cannot be set below {floor} °C while it is freezing."},
+    "cool_boost_frost_locked": {"message": "Frost protection: cooling cannot be started while it is freezing."}
   }
 }

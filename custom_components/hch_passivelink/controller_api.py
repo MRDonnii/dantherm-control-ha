@@ -14,6 +14,17 @@ from aiohttp import ClientError, ClientSession
 _LOGGER = logging.getLogger(__name__)
 
 
+class ControllerRejectedError(ConnectionError):
+    """The Pi refused a request (HTTP 4xx); its message is meant for the user.
+
+    Subclasses ConnectionError so existing handlers keep catching it.
+    """
+
+    def __init__(self, message: str, status: int) -> None:
+        super().__init__(message)
+        self.status = status
+
+
 class ControllerApiClient:
     def __init__(
         self,
@@ -49,9 +60,15 @@ class ControllerApiClient:
             json=payload,
             timeout=10,
         ) as response:
-            body = await response.json(content_type=None)
+            try:
+                body = await response.json(content_type=None)
+            except ValueError:
+                body = None
             if response.status >= 400:
-                raise ConnectionError(body.get("error") or f"Controller HTTP {response.status}")
+                message = body.get("error") if isinstance(body, dict) else None
+                if isinstance(message, str) and message.strip() and 400 <= response.status < 500:
+                    raise ControllerRejectedError(message.strip(), response.status)
+                raise ConnectionError(message or f"Controller HTTP {response.status}")
             if not isinstance(body, dict):
                 raise ConnectionError("Controller returned invalid JSON")
             return body
