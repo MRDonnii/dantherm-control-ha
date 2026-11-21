@@ -50,7 +50,8 @@ def test_out_of_range_values_are_skipped_not_sent():
     assert rooms == {}
 
 
-def test_presence_and_temperature_age_are_sent():
+
+def test_temperature_age_is_sent_and_presence_is_not():
     from datetime import timedelta
 
     from homeassistant.util import dt as dt_util
@@ -59,20 +60,15 @@ def test_presence_and_temperature_age_are_sent():
         "sensor.stue_t": SimpleNamespace(state="21.4", attributes={},
                                          last_reported=dt_util.utcnow() - timedelta(minutes=20)),
         "binary_sensor.stue_p": SimpleNamespace(state="on", attributes={}),
-        "binary_sensor.kontor_p": SimpleNamespace(state="unavailable", attributes={}),
     }
     fake = SimpleNamespace(
         room_sources=[
             {"name": "Stue", "temperature": "sensor.stue_t", "presence": "binary_sensor.stue_p"},
-            {"name": "Kontor", "presence": "binary_sensor.kontor_p"},
-            {"name": "Gang", "presence": "binary_sensor.missing"},
+            {"name": "Kontor", "presence": "binary_sensor.stue_p"},
         ],
         hass=SimpleNamespace(states=SimpleNamespace(get=states.get)),
     )
     rooms = SmartPassiveLinkCoordinator._room_payload(fake)
-    assert rooms["Stue"]["presence"] is True
     assert 1195 <= rooms["Stue"]["temperature_age_s"] <= 1210
-    # Unknown presence is sent as None, so the Pi does not count the room.
-    assert rooms["Kontor"]["presence"] is None
-    assert "entities" not in rooms["Kontor"]
-    assert rooms["Gang"]["presence"] is None
+    assert "presence" not in rooms["Stue"]
+    assert "Kontor" not in rooms

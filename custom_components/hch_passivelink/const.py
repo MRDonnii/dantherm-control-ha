@@ -45,15 +45,13 @@ CONF_UNIT_ENERGY_TODAY_ENTITY = "unit_energy_today_entity"
 CONF_ELECTRICITY_PRICE_ENTITY = "electricity_price_entity"
 CONF_HEAT_PRICE_ENTITY = "heat_price_entity"
 CONF_WEATHER_ENTITY = "weather_entity"
-# Forecast highs for the Pi's night cooling and home/away for its occupancy rules.
-# Not set: the defaults below when they exist (home/away: alarm panels and zone.home).
-# Set to "" (field cleared in the options): not sent.
+# Forecast highs for the Pi's night cooling.
+# Not set: the defaults below when they exist. Set to "" (field cleared in the options): not sent.
 CONF_FORECAST_HIGH_ENTITY = "forecast_high_entity"
 CONF_TODAY_HIGH_ENTITY = "today_high_entity"
-CONF_HOME_AWAY_ENTITY = "home_away_entity"
 DEFAULT_FORECAST_HIGH_ENTITY = "sensor.dmi_vejr_hojeste_temperatur_naeste_dogn_ensemble_90"
 DEFAULT_TODAY_HIGH_ENTITY = "sensor.dmi_vejr_hojeste_temperatur_i_dag"
-CLIMATE_SIGNAL_ENTITIES = (CONF_FORECAST_HIGH_ENTITY, CONF_TODAY_HIGH_ENTITY, CONF_HOME_AWAY_ENTITY)
+CLIMATE_SIGNAL_ENTITIES = (CONF_FORECAST_HIGH_ENTITY, CONF_TODAY_HIGH_ENTITY)
 ENERGY_SIGNAL_ENTITIES = (
     CONF_UNIT_POWER_ENTITY,
     CONF_UNIT_ENERGY_TODAY_ENTITY,

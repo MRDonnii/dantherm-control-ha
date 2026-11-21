@@ -140,7 +140,7 @@
       },
       "controller_sensors": {
         "title": "Sensorer til controlleren",
-        "description": "Vælg sensorer og en valgfri weather-entitet til controlleren på {controller}. T1 måles altid af anlægget. Vejrkildens forhold vises i WebUI, mens fugt kun bruges til styring, hvis du vælger det på Pi'en og data består T1-kontrollen. Tøm et felt for at stoppe overførslen. Natkøling i WebUI bruger vejrudsigtens højeste temperatur (som standard DMI Vejr, hvis den findes). Hjemme/ude bruges af tilstedeværelsesreglerne i WebUI: uden valgt entitet er huset ude, når en alarm er tilkoblet ude/ferie, eller når zone.home har 0 personer.",
+        "description": "Vælg sensorer og en valgfri weather-entitet til controlleren på {controller}. T1 måles altid af anlægget. Vejrkildens forhold vises i WebUI, mens fugt kun bruges til styring, hvis du vælger det på Pi'en og data består T1-kontrollen. Tøm et felt for at stoppe overførslen. Natkøling i WebUI bruger vejrudsigtens højeste temperatur (som standard DMI Vejr, hvis den findes).",
         "data": {
           "unit_power_entity": "Effektmåler på anlægget (valgfri, vises i Pi'ens WebUI)",
           "unit_energy_today_entity": "Dantherms elforbrug i dag i kWh (valgfri, fx en daglig forbrugsmåler)",
@@ -148,8 +148,7 @@
           "heat_price_entity": "Varmepris i kr/kWh (valgfri, øre/kWh omregnes)",
           "weather_entity": "Vejrkilde til WebUI og valgfri fugtstyring",
           "forecast_high_entity": "Højeste temperatur næste døgn (vejrudsigt, til natkøling)",
-          "today_high_entity": "Højeste temperatur i dag (til natkøling)",
-          "home_away_entity": "Hjemme/ude (valgfri; tom = alarm tilkoblet ude/ferie eller ingen i zone.home)"
+          "today_high_entity": "Højeste temperatur i dag (til natkøling)"
         }
       },
       "controller_menu": {

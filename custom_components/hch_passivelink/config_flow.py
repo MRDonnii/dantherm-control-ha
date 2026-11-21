@@ -23,7 +23,6 @@ from .sensor_support import (
     KIND_TEMPERATURE,
     supported_entity_ids,
 )
-from .presence_source import HOME_DOMAINS
 from .const import (
     CONF_CONNECTION_TYPE,
     CONF_SERIAL_PORT,
@@ -52,7 +51,6 @@ from .const import (
     CONF_WEATHER_ENTITY,
     CLIMATE_SIGNAL_ENTITIES,
     CONF_FORECAST_HIGH_ENTITY,
-    CONF_HOME_AWAY_ENTITY,
     CONF_TODAY_HIGH_ENTITY,
     DEFAULT_FORECAST_HIGH_ENTITY,
     DEFAULT_TODAY_HIGH_ENTITY,
@@ -439,7 +437,7 @@ class PassiveLinkOptionsFlow(config_entries.OptionsFlow):
             self._pending.update(
                 {key: user_input[key] for key in (*ENERGY_SIGNAL_ENTITIES, CONF_WEATHER_ENTITY) if user_input.get(key)}
             )
-            # Cleared: "" so the default is not picked again (home/away "" = automatic).
+            # Cleared: "" so the default is not picked again.
             for key in CLIMATE_SIGNAL_ENTITIES:
                 self._pending[key] = user_input.get(key) or ""
             return await self.async_step_controller_menu()
@@ -462,9 +460,6 @@ class PassiveLinkOptionsFlow(config_entries.OptionsFlow):
             fields[vol.Optional(key, description={"suggested_value": suggested})] = selector.EntitySelector(
                 selector.EntitySelectorConfig(domain="sensor", multiple=False)
             )
-        fields[vol.Optional(CONF_HOME_AWAY_ENTITY, description={"suggested_value": self._pending.get(CONF_HOME_AWAY_ENTITY) or None})] = selector.EntitySelector(
-            selector.EntitySelectorConfig(domain=list(HOME_DOMAINS), multiple=False)
-        )
         return self.async_show_form(
             step_id="controller_sensors",
             data_schema=vol.Schema(fields),

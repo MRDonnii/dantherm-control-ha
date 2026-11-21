@@ -184,7 +184,8 @@ def test_only_dmi_current_air_values_count_as_weather_sensors():
     assert not _is_weather_sensor("other", "sensor.dmi_vejr_temperatur", "temperature")
 
 
-def test_presence_sensors_are_offered_best_first(monkeypatch):
+
+def test_presence_sensors_are_not_offered(monkeypatch):
     from homeassistant.helpers import area_registry, device_registry, entity_registry
 
     def entry(entity_id, device_class, area_id="stue"):
@@ -193,34 +194,22 @@ def test_presence_sensors_are_offered_best_first(monkeypatch):
                                original_device_class=device_class, area_id=area_id, device_id=None,
                                name=None, original_name=None)
 
-    entities = [
-        entry("binary_sensor.hps_stuen_radar_moving_target", "motion"),
-        entry("binary_sensor.hps_stuen_radar_zone_1_occupancy", "occupancy"),
-        entry("binary_sensor.hps_stuen_presence", "occupancy"),
-        entry("binary_sensor.hps_stuen_out_pin_presence_status", "presence"),
-        entry("binary_sensor.stue_door", "door"),
-        entry("binary_sensor.no_area_motion", "motion", area_id=None),
-        entry("sensor.stue_t", "temperature"),
-    ]
+    entities = [entry("binary_sensor.hps_stuen_presence", "occupancy"), entry("sensor.stue_t", "temperature")]
     monkeypatch.setattr(area_registry, "async_get", lambda hass: SimpleNamespace(
         async_list_areas=lambda: [SimpleNamespace(id="stue", name="Stue")]))
     monkeypatch.setattr(device_registry, "async_get", lambda hass: SimpleNamespace(async_get=lambda _id: None))
     monkeypatch.setattr(entity_registry, "async_get",
                         lambda hass: SimpleNamespace(entities={e.entity_id: e for e in entities}))
     catalog = room_catalog.build_catalog(SimpleNamespace(states=SimpleNamespace(get=lambda _e: None)))
-    sensors = catalog[0]["sensors"]
-    assert sensors[0] == {"entity_id": "sensor.stue_t", "name": "sensor.stue_t", "kind": "temperature"}
-    presence = [s["entity_id"] for s in sensors if s["kind"] == "presence"]
-    assert presence[0] == "binary_sensor.hps_stuen_presence"
-    assert "binary_sensor.stue_door" not in presence and len(presence) == 4
-    assert all("device_class" not in s for s in sensors)
+    assert [s["entity_id"] for s in catalog[0]["sensors"]] == ["sensor.stue_t"]
 
 
-def test_presence_is_sent_and_tracked_from_the_pi_setup():
+def test_presence_left_in_a_pi_setup_is_ignored():
+    # A room setup from gateway 1.12.0/1.12.1 can still carry a presence sensor.
     sources = room_catalog.sources_from_setup([
         {"name": "Kontor", "type": "normal", "sensors": {"presence": "binary_sensor.hps_kontor_presence"}},
-        {"name": "Stue", "type": "normal", "sensors": {"temperature": "sensor.t", "presence": "sensor.not_binary"}},
+        {"name": "Stue", "type": "normal", "sensors": {"temperature": "sensor.t", "presence": "binary_sensor.p"}},
     ])
-    assert sources[0]["presence"] == "binary_sensor.hps_kontor_presence"
-    assert "presence" not in sources[1]
-    assert "binary_sensor.hps_kontor_presence" in room_catalog.tracked_entities(sources)
+    assert [source["name"] for source in sources] == ["Stue"]
+    assert "presence" not in sources[0]
+    assert room_catalog.tracked_entities(sources) == ["sensor.t"]

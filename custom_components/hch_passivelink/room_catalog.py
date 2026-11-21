@@ -4,8 +4,7 @@ Rooms are set up in the Dantherm WebUI (Opsætning → Rum), not in Home
 Assistant. Home Assistant only
 
 * sends a catalogue of its areas and their temperature, humidity, CO2 and
-  PM2.5 sensors and presence sensors (``build_catalog``), so the WebUI can
-  offer them, and
+  PM2.5 sensors (``build_catalog``), so the WebUI can offer them, and
 * reads the room setup back from the Pi and sends the values of the chosen
   sensors (``sources_from_setup``).
 
@@ -28,17 +27,9 @@ DEVICE_CLASS_KINDS = {
     "carbon_dioxide": "co2",
     "pm25": "pm25",
 }
-# Presence: binary sensors with these device classes (mmWave radars, PIRs).
-PRESENCE_KIND = "presence"
-PRESENCE_DEVICE_CLASSES = {"occupancy", "presence", "motion"}
-KIND_ORDER = ("temperature", "humidity", "co2", "pm25", PRESENCE_KIND)
-# Parts of a radar's sub-entities (targets, zones, output pins) that are not the room's presence.
-_PRESENCE_POOR = ("radar_", "_zone_", "zone_", "out_pin", "moving", "still", "doorbell", "user_present",
-                  "printer", "laser", "foto", "camera", "kamera")
+KIND_ORDER = ("temperature", "humidity", "co2", "pm25")
 MAX_AREAS = 64
 MAX_SENSORS_PER_AREA = 40
-# Presence sensors offered per area (a radar brings many sub-entities; the best come first).
-MAX_PRESENCE_PER_AREA = 8
 # Sensors that are rarely the room's air: appliance, device and setpoint
 # temperatures, smoothed copies, "feels like" values and car or heating
 # system readings. They stay in the catalogue but are offered last.
@@ -81,31 +72,14 @@ WEATHER_AREA_NAME = "Vejr (DMI)"
 WEATHER_OBJECT_IDS = {"temperature": ("dmi_vejr_temperatur",), "humidity": ("dmi_vejr_luftfugtighed",)}
 
 
-# Kept in the catalogue only while sorting.
-_INTERNAL = ("device_id", "device_class")
-
-
 def _is_weather_sensor(platform: object, entity_id: str, kind: str) -> bool:
     """The DMI weather service's current air temperature or humidity (not grass, soil, max/min or forecast)."""
     object_id = entity_id.split(".", 1)[-1]
     return "dmi" in str(platform or "") and object_id in WEATHER_OBJECT_IDS.get(kind, ())
 
 
-def presence_score(entity_id: str, device_class: str, area_id: str, area_name: str) -> int:
-    """Higher is more likely the room's own presence sensor (e.g. binary_sensor.hps_stuen_presence)."""
-    folded = entity_id.casefold()
-    score = sensor_score(entity_id, area_id, area_name, 1)
-    if device_class in ("occupancy", "presence"):
-        score += 2
-    if folded.endswith(("_presence", "_occupancy", "_tilstede")) or "presence_gruppe" in folded:
-        score += 4
-    if any(marker in folded for marker in _PRESENCE_POOR):
-        score -= 6
-    return score
-
-
 def build_catalog(hass) -> list[dict[str, object]]:
-    """Every HA area with its temperature, humidity, CO2 and PM2.5 sensors and presence sensors.
+    """Every HA area with its temperature, humidity, CO2 and PM2.5 sensors.
 
     Disabled, hidden, diagnostic/config entities and this integration's own
     entities are left out. Sensors are grouped by kind with the likely room
@@ -120,15 +94,12 @@ def build_catalog(hass) -> list[dict[str, object]]:
     entities = er.async_get(hass)
     found: dict[str, list[dict[str, object]]] = defaultdict(list)
     for entry in list(entities.entities.values()):
-        if entry.domain not in ("sensor", "binary_sensor") or entry.platform == DOMAIN:
+        if entry.domain != "sensor" or entry.platform == DOMAIN:
             continue
         if entry.disabled_by is not None or entry.hidden_by is not None or entry.entity_category is not None:
             continue
         device_class = entry.device_class or entry.original_device_class
-        if entry.domain == "binary_sensor":
-            kind = PRESENCE_KIND if str(device_class or "") in PRESENCE_DEVICE_CLASSES else None
-        else:
-            kind = DEVICE_CLASS_KINDS.get(str(device_class or ""))
+        kind = DEVICE_CLASS_KINDS.get(str(device_class or ""))
         if kind is None:
             continue
         area_id = entry.area_id
@@ -136,7 +107,7 @@ def build_catalog(hass) -> list[dict[str, object]]:
             device = devices.async_get(entry.device_id)
             area_id = device.area_id if device else None
         if not area_id:
-            if kind == PRESENCE_KIND or not _is_weather_sensor(entry.platform, entry.entity_id, kind):
+            if not _is_weather_sensor(entry.platform, entry.entity_id, kind):
                 continue
             area_id = WEATHER_AREA_ID
         state = hass.states.get(entry.entity_id)
@@ -145,46 +116,36 @@ def build_catalog(hass) -> list[dict[str, object]]:
         found[area_id].append({
             "entity_id": entry.entity_id, "name": str(name)[:80], "kind": kind,
             "unit": str(unit)[:16] if unit else None, "device_id": entry.device_id,
-            "device_class": str(device_class or ""),
         })
     catalog: list[dict[str, object]] = []
     weather = sorted(found.get(WEATHER_AREA_ID) or [], key=lambda sensor: (KIND_ORDER.index(str(sensor["kind"])), str(sensor["entity_id"])))
     if weather:
         catalog.append({
             "area_id": WEATHER_AREA_ID, "area_name": WEATHER_AREA_NAME,
-            "sensors": [{key: value for key, value in sensor.items() if key not in _INTERNAL and value is not None}
+            "sensors": [{key: value for key, value in sensor.items() if key != "device_id" and value is not None}
                         for sensor in weather[:MAX_SENSORS_PER_AREA]],
         })
     for area in sorted(areas.async_list_areas(), key=lambda item: item.name.casefold()):
         sensors = found.get(area.id) or []
         kinds_per_device: dict[str, set[str]] = defaultdict(set)
         for sensor in sensors:
-            if sensor["device_id"] and sensor["kind"] != PRESENCE_KIND:
+            if sensor["device_id"]:
                 kinds_per_device[str(sensor["device_id"])].add(str(sensor["kind"]))
         sensors.sort(key=lambda sensor: (
             KIND_ORDER.index(str(sensor["kind"])),
-            -(presence_score(str(sensor["entity_id"]), str(sensor.get("device_class") or ""), area.id, area.name)
-              if sensor["kind"] == PRESENCE_KIND else
-              sensor_score(str(sensor["entity_id"]), area.id, area.name,
-                           len(kinds_per_device.get(str(sensor["device_id"]), ())))),
+            -sensor_score(str(sensor["entity_id"]), area.id, area.name,
+                          len(kinds_per_device.get(str(sensor["device_id"]), ()))),
             str(sensor["entity_id"]),
         ))
         catalog.append({
             "area_id": area.id,
             "area_name": area.name,
             "sensors": [
-                {key: value for key, value in sensor.items() if key not in _INTERNAL and value is not None}
-                for sensor in _capped(sensors)
+                {key: value for key, value in sensor.items() if key != "device_id" and value is not None}
+                for sensor in sensors[:MAX_SENSORS_PER_AREA]
             ],
         })
     return catalog[:MAX_AREAS]
-
-
-def _capped(sensors: list[dict[str, object]]) -> list[dict[str, object]]:
-    """The measurements as before (best first, at most 40) plus the best few presence sensors."""
-    measurements = [sensor for sensor in sensors if sensor["kind"] != PRESENCE_KIND]
-    presence = [sensor for sensor in sensors if sensor["kind"] == PRESENCE_KIND]
-    return measurements[:MAX_SENSORS_PER_AREA] + presence[:MAX_PRESENCE_PER_AREA]
 
 
 def sources_from_setup(rooms: Iterable[object]) -> list[dict[str, object]]:
@@ -212,10 +173,7 @@ def sources_from_setup(rooms: Iterable[object]) -> list[dict[str, object]]:
             entity_id = sensors.get(kind)
             if isinstance(entity_id, str) and entity_id.startswith("sensor."):
                 source[kind] = entity_id
-        presence = sensors.get(PRESENCE_KIND)
-        if isinstance(presence, str) and presence.startswith("binary_sensor."):
-            source[PRESENCE_KIND] = presence
-        if any(source.get(kind) for kind in (*ROOM_SENSOR_KEYS, PRESENCE_KIND)):
+        if any(source.get(kind) for kind in ROOM_SENSOR_KEYS):
             result.append(source)
     return result
 
@@ -244,6 +202,6 @@ def tracked_entities(sources: Iterable[dict[str, object]]) -> list[str]:
         str(entity_id)
         for source in sources
         if bool(source.get("enabled", True))
-        for entity_id in (source.get(kind) for kind in (*ROOM_SENSOR_KEYS, PRESENCE_KIND))
+        for entity_id in (source.get(kind) for kind in ROOM_SENSOR_KEYS)
         if entity_id
     })

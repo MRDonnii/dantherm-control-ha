@@ -140,7 +140,7 @@
       },
       "controller_sensors": {
         "title": "Sensors sent to the controller",
-        "description": "Choose sensors and an optional weather entity for the controller at {controller}. T1 always comes from the unit. Weather conditions appear in the WebUI; humidity affects control only if enabled on the Pi and the data pass the T1 check. Clear a field to stop sending it. Night cooling in the WebUI uses the forecast high (DMI Vejr by default when present). Home/away is used by the occupancy rules in the WebUI: without an entity the house is away when an alarm is armed away/vacation or zone.home has 0 persons.",
+        "description": "Choose sensors and an optional weather entity for the controller at {controller}. T1 always comes from the unit. Weather conditions appear in the WebUI; humidity affects control only if enabled on the Pi and the data pass the T1 check. Clear a field to stop sending it. Night cooling in the WebUI uses the forecast high (DMI Vejr by default when present).",
         "data": {
           "unit_power_entity": "Power meter on the unit (optional, shown in the Pi WebUI)",
           "unit_energy_today_entity": "Unit energy today in kWh (optional, e.g. a daily utility meter)",
@@ -148,8 +148,7 @@
           "heat_price_entity": "Heat price in DKK/kWh (optional, øre/kWh is converted)",
           "weather_entity": "Weather source for the WebUI and optional humidity control",
           "forecast_high_entity": "Highest temperature next 24 h (forecast, for night cooling)",
-          "today_high_entity": "Highest temperature today (for night cooling)",
-          "home_away_entity": "Home/away (optional; empty = alarm armed away/vacation or nobody in zone.home)"
+          "today_high_entity": "Highest temperature today (for night cooling)"
         }
       },
       "controller_menu": {
