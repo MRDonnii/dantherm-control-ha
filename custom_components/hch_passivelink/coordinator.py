@@ -79,6 +79,9 @@ class PassiveLinkCoordinator(DataUpdateCoordinator[dict[str, object]]):
         self._hac1_lost_since: float | None = None
         self._efficiency_reference: float | None = None
         self._filter_reset_history: list[float] = []
+        # The unit's own filter counter is on the bus; it alone says when the
+        # filter was changed, so the local reset button stands down.
+        self.unit_filter_counter = False
 
     async def async_load_filter_state(self) -> None:
         """Load filter state before entities are created."""
@@ -345,6 +348,7 @@ class PassiveLinkCoordinator(DataUpdateCoordinator[dict[str, object]]):
         hours, months = data.get("filter_unit_hours"), data.get("filter_unit_period_months")
         if not isinstance(hours, int) or not isinstance(months, int):
             return
+        self.unit_filter_counter = True
         reset = time.time() - hours * 3600
         interval = round(months * 730 / 24)
         changed = False
