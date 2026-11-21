@@ -65,6 +65,19 @@ def sensor_score(entity_id: str, area_id: str, area_name: str, device_kinds: int
     return score
 
 
+# The weather service's current air temperature and humidity (DMI Vejr) have no HA
+# area: they go in a virtual area that the WebUI lists first for outdoor rooms.
+WEATHER_AREA_ID = "_weather"
+WEATHER_AREA_NAME = "Vejr (DMI)"
+WEATHER_OBJECT_IDS = {"temperature": ("dmi_vejr_temperatur",), "humidity": ("dmi_vejr_luftfugtighed",)}
+
+
+def _is_weather_sensor(platform: object, entity_id: str, kind: str) -> bool:
+    """The DMI weather service's current air temperature or humidity (not grass, soil, max/min or forecast)."""
+    object_id = entity_id.split(".", 1)[-1]
+    return "dmi" in str(platform or "") and object_id in WEATHER_OBJECT_IDS.get(kind, ())
+
+
 def build_catalog(hass) -> list[dict[str, object]]:
     """Every HA area with its temperature, humidity, CO2 and PM2.5 sensors.
 
@@ -94,7 +107,9 @@ def build_catalog(hass) -> list[dict[str, object]]:
             device = devices.async_get(entry.device_id)
             area_id = device.area_id if device else None
         if not area_id:
-            continue
+            if not _is_weather_sensor(entry.platform, entry.entity_id, kind):
+                continue
+            area_id = WEATHER_AREA_ID
         state = hass.states.get(entry.entity_id)
         name = (state.name if state is not None else None) or entry.name or entry.original_name or entry.entity_id
         unit = state.attributes.get("unit_of_measurement") if state is not None else None
@@ -103,6 +118,13 @@ def build_catalog(hass) -> list[dict[str, object]]:
             "unit": str(unit)[:16] if unit else None, "device_id": entry.device_id,
         })
     catalog: list[dict[str, object]] = []
+    weather = sorted(found.get(WEATHER_AREA_ID) or [], key=lambda sensor: (KIND_ORDER.index(str(sensor["kind"])), str(sensor["entity_id"])))
+    if weather:
+        catalog.append({
+            "area_id": WEATHER_AREA_ID, "area_name": WEATHER_AREA_NAME,
+            "sensors": [{key: value for key, value in sensor.items() if key != "device_id" and value is not None}
+                        for sensor in weather[:MAX_SENSORS_PER_AREA]],
+        })
     for area in sorted(areas.async_list_areas(), key=lambda item: item.name.casefold()):
         sensors = found.get(area.id) or []
         kinds_per_device: dict[str, set[str]] = defaultdict(set)

@@ -173,3 +173,12 @@ def test_lost_catalogue_is_resent(monkeypatch):
     coordinator = _coordinator(client, [], monkeypatch)
     asyncio.run(coordinator.async_refresh_room_setup())
     assert [call[0] for call in client.calls] == ["rooms", "catalog"]
+
+
+def test_only_dmi_current_air_values_count_as_weather_sensors():
+    from custom_components.hch_passivelink.room_catalog import _is_weather_sensor
+    assert _is_weather_sensor("dmi_vejr", "sensor.dmi_vejr_temperatur", "temperature")
+    assert _is_weather_sensor("dmi_vejr", "sensor.dmi_vejr_luftfugtighed", "humidity")
+    assert not _is_weather_sensor("dmi_vejr", "sensor.dmi_vejr_graestemperatur", "temperature")
+    assert not _is_weather_sensor("dmi_vejr", "sensor.dmi_vejr_hojeste_temperatur_i_dag", "temperature")
+    assert not _is_weather_sensor("other", "sensor.dmi_vejr_temperatur", "temperature")
