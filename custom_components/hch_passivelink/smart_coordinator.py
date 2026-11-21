@@ -5,13 +5,24 @@ import asyncio
 import logging
 from datetime import timedelta
 
+from homeassistant.util import dt as dt_util
+
 from homeassistant.components import persistent_notification
 from homeassistant.core import Event, callback
 from homeassistant.helpers.event import async_track_state_change_event, async_track_time_interval
 
-from .const import ROOM_SENSOR_KEYS, ROOM_SENSOR_RANGES
+from .const import (
+    CONF_FORECAST_HIGH_ENTITY,
+    CONF_HOME_AWAY_ENTITY,
+    CONF_TODAY_HIGH_ENTITY,
+    DEFAULT_FORECAST_HIGH_ENTITY,
+    DEFAULT_TODAY_HIGH_ENTITY,
+    ROOM_SENSOR_KEYS,
+    ROOM_SENSOR_RANGES,
+)
+from .presence_source import climate_signals, resolve_entity
 from .coordinator import PassiveLinkCoordinator
-from .room_catalog import build_catalog, legacy_payload, sources_from_setup, tracked_entities
+from .room_catalog import PRESENCE_KIND, build_catalog, legacy_payload, sources_from_setup, tracked_entities
 from .weather_source import weather_payload
 
 _LOGGER = logging.getLogger(__name__)
@@ -29,6 +40,7 @@ class SmartPassiveLinkCoordinator(PassiveLinkCoordinator):
                  smart_input_valid_for: int = 180, unit_power_entity: str | None = None,
                  energy_entities: dict[str, str | None] | None = None,
                  weather_entity: str | None = None,
+                 climate_entities: dict[str, str] | None = None,
                  rooms_enabled: bool | None = None,
                  **kwargs) -> None:
         super().__init__(*args, **kwargs)
@@ -66,6 +78,11 @@ class SmartPassiveLinkCoordinator(PassiveLinkCoordinator):
         self.weather_entity = weather_entity if weather_entity and weather_entity.startswith("weather.") else None
         self._remove_weather_listener = None
         self._weather_sent_at = 0.0
+        # Forecast highs and home/away for the Pi's night cooling and occupancy rules
+        # (options: a chosen entity, "" for none, or absent for the default).
+        self.climate_entities = dict(climate_entities or {})
+        self._remove_home_listener = None
+        self._climate_sent_at = 0.0
 
     def co2_offset(self) -> int:
         """The Pi's CO2 calibration, so HA shows the same corrected CO2 as the WebUI."""
@@ -143,8 +160,24 @@ class SmartPassiveLinkCoordinator(PassiveLinkCoordinator):
                     continue
                 values[kind] = value
                 entities[kind] = str(entity_id)
+                if kind == "temperature":
+                    # Lets the Pi skip a sensor that has stopped reporting.
+                    reported = getattr(state, "last_reported", None) or getattr(state, "last_updated", None)
+                    try:
+                        age = (dt_util.utcnow() - reported).total_seconds()
+                    except (TypeError, AttributeError):
+                        age = None
+                    if age is not None and age >= 0:
+                        values["temperature_age_s"] = round(age)
+            presence_entity = source.get(PRESENCE_KIND)
+            if presence_entity:
+                state = self.hass.states.get(presence_entity)
+                value = state.state if state is not None else None
+                # None: the sensor is unavailable, so the room's presence is unknown on the Pi.
+                values["presence"] = True if value == "on" else False if value == "off" else None
             if entities:
                 values["entities"] = entities
+            if entities or "presence" in values:
                 rooms[name] = values
         return rooms
 
@@ -340,10 +373,44 @@ class SmartPassiveLinkCoordinator(PassiveLinkCoordinator):
             self._async_send_weather(), "Dantherm HCH weather push"
         )
 
+    def _climate_entities(self) -> tuple[str | None, str | None, str | None]:
+        exists = lambda entity_id: self.hass.states.get(entity_id) is not None  # noqa: E731
+        return (
+            resolve_entity(self.climate_entities, CONF_FORECAST_HIGH_ENTITY, DEFAULT_FORECAST_HIGH_ENTITY, exists),
+            resolve_entity(self.climate_entities, CONF_TODAY_HIGH_ENTITY, DEFAULT_TODAY_HIGH_ENTITY, exists),
+            resolve_entity(self.climate_entities, CONF_HOME_AWAY_ENTITY, None, exists),
+        )
+
+    def _climate_payload(self) -> dict[str, object]:
+        forecast, today, home = self._climate_entities()
+        return climate_signals(self.hass.states.get, forecast, today, home,
+                               self.hass.states.async_entity_ids("alarm_control_panel"))
+
+    async def _async_send_climate_signals(self) -> None:
+        """Forecast highs (night cooling) and home/away (occupancy) for the Pi, renewed each minute."""
+        if self.controller_client is None:
+            return
+        self._climate_sent_at = self.hass.loop.time()
+        try:
+            await self.controller_client.async_send_signals(self._climate_payload(), SIGNAL_VALID_FOR)
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:  # noqa: BLE001 - optional; retried next minute
+            _LOGGER.debug("Unable to send forecast and home/away to Pi controller: %s", error)
+
+    @callback
+    def _schedule_climate_push(self, _event: Event | None = None) -> None:
+        if _event is not None and self.hass.loop.time() - self._climate_sent_at < 10:
+            return
+        self.hass.async_create_background_task(
+            self._async_send_climate_signals(), "Dantherm HCH home/away push"
+        )
+
     async def _async_renew_signals(self) -> None:
         await self._async_send_unit_power()
         await self._async_send_energy_signals()
         await self._async_send_weather()
+        await self._async_send_climate_signals()
         if self.controller_client is None or not self.fireplace_signal:
             return
         try:
@@ -396,6 +463,13 @@ class SmartPassiveLinkCoordinator(PassiveLinkCoordinator):
                 self.hass, [self.weather_entity], self._schedule_weather_push
             )
             self._schedule_weather_push()
+        # Arming the alarm or the last person leaving reaches the Pi within seconds.
+        _forecast, _today, home = self._climate_entities()
+        watched = [home] if home else [*self.hass.states.async_entity_ids("alarm_control_panel"), "zone.home"]
+        self._remove_home_listener = async_track_state_change_event(
+            self.hass, watched, self._schedule_climate_push
+        )
+        self._schedule_climate_push()
         if self.rooms_enabled:
             self._update_room_listener()
             self._remove_room_timer = async_track_time_interval(
@@ -417,6 +491,9 @@ class SmartPassiveLinkCoordinator(PassiveLinkCoordinator):
             )
 
     async def async_shutdown(self) -> None:
+        if getattr(self, "_remove_home_listener", None) is not None:
+            self._remove_home_listener()
+            self._remove_home_listener = None
         if self._remove_weather_listener is not None:
             self._remove_weather_listener()
             self._remove_weather_listener = None

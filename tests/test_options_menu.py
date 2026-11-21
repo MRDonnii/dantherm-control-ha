@@ -51,3 +51,25 @@ def test_translations_cover_the_menu(lang):
     assert set(steps["controller_menu"]["menu_options"]) == {"controller_sensors", "rooms_info", "webui_info", "finish_controller"}
     assert "{url}" in steps["rooms_info"]["description"]
     assert "rooms_menu" not in steps and "controller_settings" not in steps
+
+
+def test_forecast_and_home_entities_default_and_can_be_cleared():
+    flow, shown = _flow({"controller_host": "10.0.0.5"})
+    states = {"sensor.dmi_vejr_hojeste_temperatur_naeste_dogn_ensemble_90": SimpleNamespace(state="25")}
+    flow.hass = SimpleNamespace(states=SimpleNamespace(get=states.get, async_all=lambda _domain: []))
+    flow._pending = {}
+    asyncio.run(flow.async_step_controller_sensors())
+    suggested = {str(key): key.description.get("suggested_value") for key in shown["data_schema"].schema}
+    assert suggested["forecast_high_entity"] == "sensor.dmi_vejr_hojeste_temperatur_naeste_dogn_ensemble_90"
+    assert suggested["today_high_entity"] is None  # the default does not exist here
+    assert suggested["home_away_entity"] is None  # automatic: alarm and zone.home
+    flow.async_step_controller_menu = lambda: asyncio.sleep(0)
+    asyncio.run(flow.async_step_controller_sensors({"home_away_entity": "alarm_control_panel.x"}))
+    assert flow._pending["forecast_high_entity"] == ""  # cleared: not sent, the default is not picked again
+    assert flow._pending["home_away_entity"] == "alarm_control_panel.x"
+
+
+@pytest.mark.parametrize("lang", ["da", "en"])
+def test_translations_cover_the_new_signal_fields(lang):
+    data = json.loads((TRANSLATIONS / f"{lang}.json").read_text(encoding="utf-8"))["options"]["step"]["controller_sensors"]["data"]
+    assert {"forecast_high_entity", "today_high_entity", "home_away_entity"} <= set(data)
