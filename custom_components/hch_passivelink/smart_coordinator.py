@@ -11,10 +11,15 @@ from homeassistant.helpers.event import async_track_state_change_event, async_tr
 
 from .const import ROOM_SENSOR_KEYS, ROOM_SENSOR_RANGES
 from .coordinator import PassiveLinkCoordinator
+from .room_catalog import build_catalog, legacy_payload, sources_from_setup, tracked_entities
 from .weather_source import weather_payload
 
 _LOGGER = logging.getLogger(__name__)
 SIGNAL_VALID_FOR = 300
+# How often HA's area/sensor catalogue is sent to the Pi for the WebUI page "Rum".
+CATALOG_INTERVAL = timedelta(minutes=10)
+# The Pi keeps the catalogue in memory; resend it when it is older than this (or gone after a restart).
+CATALOG_MAX_AGE_S = 900
 
 
 class SmartPassiveLinkCoordinator(PassiveLinkCoordinator):
@@ -24,12 +29,23 @@ class SmartPassiveLinkCoordinator(PassiveLinkCoordinator):
                  smart_input_valid_for: int = 180, unit_power_entity: str | None = None,
                  energy_entities: dict[str, str | None] | None = None,
                  weather_entity: str | None = None,
+                 rooms_enabled: bool | None = None,
                  **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self.controller_client = controller_client
         self.controller_state: dict[str, object] = {}
         self.controller_task = None
+        # Rooms from the old options flow: sent once to the Pi to be taken over,
+        # and used only while the Pi has no room setup of its own.
         self.room_sources = list(room_sources or [])
+        self.rooms_enabled = bool(self.room_sources) if rooms_enabled is None else bool(rooms_enabled)
+        # The room setup made in the Dantherm WebUI (Opsætning → Rum), read from the Pi.
+        self.pi_rooms: list[dict[str, object]] | None = None
+        self._room_entities: list[str] = []
+        self._remove_catalog_timer = None
+        self._room_cycle_task: asyncio.Task | None = None
+        # Set once the Pi says it has taken the old rooms over (or has its own).
+        self._pi_migrated = False
         self.smart_input_valid_for = max(30, min(900, int(smart_input_valid_for)))
         self._remove_room_listener = None
         self._remove_room_timer = None
@@ -98,7 +114,7 @@ class SmartPassiveLinkCoordinator(PassiveLinkCoordinator):
         are hints to the Pi; all demand calculation stays on the controller.
         """
         rooms: dict[str, dict[str, object]] = {}
-        for source in self.room_sources:
+        for source in SmartPassiveLinkCoordinator.active_room_sources(self):
             name = str(source.get("name") or "").strip()
             if not name:
                 continue
@@ -132,8 +148,80 @@ class SmartPassiveLinkCoordinator(PassiveLinkCoordinator):
                 rooms[name] = values
         return rooms
 
+    def active_room_sources(self) -> list[dict[str, object]]:
+        """The rooms set up on the Pi, or the old options-flow rooms until the Pi has some."""
+        pi_rooms = getattr(self, "pi_rooms", None)
+        if pi_rooms:
+            return sources_from_setup(pi_rooms)
+        return list(self.room_sources)
+
+    @callback
+    def _apply_room_setup(self, view: object) -> None:
+        if not isinstance(view, dict) or not isinstance(view.get("rooms"), list):
+            return
+        self.pi_rooms = [room for room in view["rooms"] if isinstance(room, dict)]
+        self._pi_migrated = view.get("migrated") is True or bool(self.pi_rooms)
+        self._update_room_listener()
+
+    @callback
+    def _update_room_listener(self) -> None:
+        """Follow the sensors of the current rooms; they change when the WebUI setup changes."""
+        entity_ids = tracked_entities(self.active_room_sources())
+        if entity_ids == self._room_entities and (self._remove_room_listener is not None or not entity_ids):
+            return
+        if self._remove_room_listener is not None:
+            self._remove_room_listener()
+            self._remove_room_listener = None
+        self._room_entities = entity_ids
+        if entity_ids:
+            self._remove_room_listener = async_track_state_change_event(
+                self.hass, entity_ids, self._schedule_room_push
+            )
+
+    async def async_send_catalog(self) -> None:
+        """Send HA's areas and sensors to the Pi and take its room setup back."""
+        if self.controller_client is None or not self.rooms_enabled:
+            return
+        try:
+            view = await self.controller_client.async_send_catalog(
+                build_catalog(self.hass),
+                None if self._pi_migrated else (legacy_payload(self.room_sources) or None),
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:  # noqa: BLE001 - an older Pi has no room setup; keep the old rooms
+            _LOGGER.debug("Unable to send the room catalogue to the Pi controller: %s", error)
+            return
+        self._apply_room_setup(view)
+
+    async def async_refresh_room_setup(self) -> None:
+        """Read the room setup from the Pi; resend the catalogue if the Pi has lost it."""
+        if self.controller_client is None or not self.rooms_enabled:
+            return
+        try:
+            view = await self.controller_client.async_get_rooms()
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:  # noqa: BLE001 - keep the last known setup
+            _LOGGER.debug("Unable to read the room setup from the Pi controller: %s", error)
+            return
+        age = view.get("catalog_age_seconds") if isinstance(view, dict) else None
+        if not isinstance(age, (int, float)) or age > CATALOG_MAX_AGE_S:
+            await self.async_send_catalog()
+            return
+        self._apply_room_setup(view)
+
+    async def _async_room_cycle(self, *, catalog: bool = False) -> None:
+        if catalog:
+            await self.async_send_catalog()
+        else:
+            await self.async_refresh_room_setup()
+        await self.async_send_room_inputs()
+
     async def async_send_room_inputs(self) -> None:
-        if self.controller_client is None or not self.room_sources:
+        if self.controller_client is None or not self.rooms_enabled:
+            return
+        if not self.active_room_sources():
             return
         try:
             await self.controller_client.async_send_rooms(
@@ -308,23 +396,25 @@ class SmartPassiveLinkCoordinator(PassiveLinkCoordinator):
                 self.hass, [self.weather_entity], self._schedule_weather_push
             )
             self._schedule_weather_push()
-        entity_ids = sorted({
-            str(entity_id)
-            for source in self.room_sources
-            if bool(source.get("enabled", True))
-            for entity_id in (source.get(kind) for kind in ROOM_SENSOR_KEYS)
-            if entity_id
-        })
-        if entity_ids:
-            self._remove_room_listener = async_track_state_change_event(
-                self.hass, entity_ids, self._schedule_room_push
-            )
+        if self.rooms_enabled:
+            self._update_room_listener()
             self._remove_room_timer = async_track_time_interval(
                 self.hass,
-                callback(lambda _now: self._schedule_room_push()),
+                callback(lambda _now: self.hass.async_create_background_task(
+                    self._async_room_cycle(), "Dantherm HCH Smart Auto room cycle"
+                )),
                 timedelta(seconds=60),
             )
-            self._schedule_room_push()
+            self._remove_catalog_timer = async_track_time_interval(
+                self.hass,
+                callback(lambda _now: self.hass.async_create_background_task(
+                    self.async_send_catalog(), "Dantherm HCH room catalogue"
+                )),
+                CATALOG_INTERVAL,
+            )
+            self._room_cycle_task = self.hass.async_create_background_task(
+                self._async_room_cycle(catalog=True), "Dantherm HCH room catalogue and push"
+            )
 
     async def async_shutdown(self) -> None:
         if self._remove_weather_listener is not None:
@@ -342,6 +432,18 @@ class SmartPassiveLinkCoordinator(PassiveLinkCoordinator):
         if self._remove_room_timer is not None:
             self._remove_room_timer()
             self._remove_room_timer = None
+        if self._remove_catalog_timer is not None:
+            self._remove_catalog_timer()
+            self._remove_catalog_timer = None
+        if self._room_cycle_task is not None and not self._room_cycle_task.done():
+            self._room_cycle_task.cancel()
+            try:
+                await self._room_cycle_task
+            except asyncio.CancelledError:
+                pass
+            except Exception as error:  # noqa: BLE001 - never block shutdown
+                _LOGGER.debug("Room catalogue task ended with error during shutdown: %s", error)
+        self._room_cycle_task = None
         if self._room_send_task is not None:
             self._room_send_task.cancel()
             try:

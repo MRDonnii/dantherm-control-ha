@@ -205,6 +205,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: PassiveLinkConfigEntry) 
         ),
         controller_client=controller_client,
         room_sources=_room_sources(config),
+        rooms_enabled=bool(config.get(CONF_SMART_ROOMS_ENABLED, False)),
         smart_input_valid_for=config.get(
             CONF_SMART_INPUT_VALID_FOR, DEFAULT_SMART_INPUT_VALID_FOR
         ),

@@ -37,23 +37,25 @@ Version `0.8.1-beta.17` connects to the controller API of the [Dantherm Control 
 Home Assistant -> authenticated controller HTTP API -> Raspberry Pi arbitration -> verified RS485 writes -> HCH5/HAC1
 ```
 
-The Pi is source of truth. HCP4 always has priority, `UNKNOWN` or unhealthy bus state blocks all controller writes, and any verified foreign FC06/FC16 write makes Pi yield immediately. The HA Options UI manages the API host/port/token, lease TTL, dynamic add/edit/delete rooms, priorities, controller parameters, afterheat setpoint and all six fan profiles. WebUI changes appear in HA on the next controller poll.
+The Pi is source of truth. HCP4 always has priority, `UNKNOWN` or unhealthy bus state blocks all controller writes, and any verified foreign FC06/FC16 write makes Pi yield immediately. The HA Options UI manages only the connection (API host/port/token, lease TTL) and which energy and weather sensors are sent to the Pi. Rooms, fan steps, humidity/CO₂ limits, afterheat, night and free cooling are set up in one place: the Pi's Dantherm WebUI (**Opsætning → Rum** and **Opsætning → Indstillinger**). HA keeps its entities for control from automations and dashboards; WebUI changes appear in HA on the next controller poll.
 
 #### Choosing which sensors are sent to the controller
 
-In the controller step of the Options UI you enter the IP address and API port (default `8080`) of the Raspberry Pi controller; the raw RS485 stream stays on its own port (default `4196`). The controller menu then has **Sensors sent to the controller** for the energy data and weather below and **Smart Auto rooms** for room sensors. Every sensor picker lists only sensors the controller understands, judged by unit and device class:
+In the controller step of the Options UI you enter the IP address and API port (default `8080`) of the Raspberry Pi controller; the raw RS485 stream stays on its own port (default `4196`). The controller menu then has **Energy and weather data for the controller** for the sensors below, and two info pages that link to the WebUI for rooms and ventilation settings. Every sensor picker lists only sensors the controller understands, judged by unit and device class:
 
 | Input | Listed sensors |
 | --- | --- |
-| Room temperature | °C |
-| Room humidity | device class humidity, % |
-| Room CO₂ | device class carbon dioxide (or ppm without a device class) |
-| Room PM2.5 | device class PM2.5, µg/m³ (used only when PM2.5 is enabled on the Pi) |
 | Unit power | W or kW |
 | Unit energy today | Wh, kWh or MWh |
 | Electricity / heat price | kr, DKK or øre per kWh or MWh |
 
-Clearing a field stops sending that sensor. Each room also has a room type (`auto`, `normal`, `bathroom`; `auto` lets the Pi guess from the name). Unknown, unavailable or out-of-range values are left out of the message instead of being sent, and every room tells the Pi which HA sensor each value came from (`entities`).
+Clearing a field stops sending that sensor.
+
+#### Rooms (set up in the Dantherm WebUI)
+
+Rooms are set up on the Pi, in the WebUI under **Opsætning → Rum**. Home Assistant sends the Pi a catalogue of every area with its temperature, humidity, CO₂ and PM2.5 sensors (disabled, hidden, diagnostic and this integration's own entities are left out; the likely room sensor is listed first) at start-up and every 10 minutes (`POST /api/controller/ha-catalog`). It reads the room setup back every minute (`GET /api/controller/rooms`) and sends the values of the chosen sensors. Unknown, unavailable or out-of-range values are left out of the message, and every room tells the Pi which HA sensor each value came from (`entities`).
+
+**Legacy:** the room list in the old Options UI (**Smart Auto rooms**) is no longer edited in Home Assistant. Existing rooms are kept unchanged, sent to the Pi once to become its first room setup, and only used while the Pi has no room setup (e.g. an older Pi version without the **Rum** page).
 
 #### Optional weather for display and humidity control
 

@@ -151,76 +151,51 @@
       },
       "controller_menu": {
         "title": "Controlleropsætning",
-        "description": "Værdierne læses direkte fra Pi-controlleren. Ændringer gemmes på Pi'en, som fortsat er source of truth.",
+        "description": "Her vælger du kun, hvilke Home Assistant-data der sendes til Pi'en. Selve ventilationen (rum, trin, fugt og CO₂, eftervarme, nat, frikøling) sættes op ét sted: Dantherm-WebUI på {url}.",
         "menu_options": {
-          "controller_sensors": "Sensorer der sendes til controlleren",
-          "controller_settings": "Drift, Smart Auto og eftervarme",
-          "fan_profiles": "Ventilationstrin",
-          "rooms_menu": "Smart Auto-rum",
+          "controller_sensors": "Energi- og vejrdata til controlleren",
+          "rooms_info": "Rum (sættes op i Dantherm-WebUI)",
+          "webui_info": "Drift, trin og luftkvalitet (sættes op i Dantherm-WebUI)",
           "finish_controller": "Gem integrationsindstillinger"
         }
       },
-      "controller_settings": {
-        "title": "Controllerparametre",
-        "description": "Disse værdier gemmes direkte på Raspberry Pi-controlleren.",
+      "rooms_info": {
+        "title": "Rum sættes nu op i Dantherm-WebUI",
+        "description": "Rum sættes nu op i Dantherm-WebUI → Opsætning → Rum: {url}\n\nHome Assistant sender automatisk alle områder med temperatur-, fugt-, CO₂- og PM2.5-følere til Pi'en, så du kan vælge dem dér. De {count} rum, der tidligere var sat op her, flyttes én gang til Pi'en og bruges kun, indtil Pi'en har sin egen rumopsætning."
+      },
+      "webui_info": {
+        "title": "Indstillinger ligger i Dantherm-WebUI",
+        "description": "Drift, ventilationstrin, fugt og CO₂, eftervarme, nat og frikøling sættes op i Dantherm-WebUI → Opsætning → Indstillinger: {url}\n\nHome Assistant har stadig entiteter til at styre anlægget fra automationer og dashboards."
+      },
+      "tcp": {
+        "title": "RS485 over TCP",
+        "description": "Indtast IP-adressen og TCP-porten på Raspberry Pi-gatewayen eller RS485-til-Ethernet-adapteren.",
         "data": {
-          "mode": "Driftstilstand", "manual_level": "Manuelt niveau",
-          "local_normal_level": "Local Auto normalniveau", "local_min_level": "Local Auto minimum", "local_max_level": "Local Auto maksimum",
-          "rh_setpoint": "RH setpunkt", "rh_hysteresis": "RH hysterese", "co2_setpoint": "CO2 setpunkt", "co2_hysteresis": "CO2 hysterese",
-          "auto_step_rh": "RH pr. ventilationstrin", "auto_step_co2": "CO2 pr. ventilationstrin",
-          "downshift_delay_seconds": "Nedreguleringsforsinkelse (sekunder)", "boost_hold_seconds": "Boost holdetid (sekunder)",
-          "ha_timeout_seconds": "HA timeout (sekunder)", "afterheat_setpoint": "Eftervarme setpunkt"
+          "host": "IP-adresse eller værtsnavn",
+          "port": "TCP-port"
         }
       },
-      "fan_steps": {"title": "Dantherm 4 trin", "description": "Indregulér som på Dantherms HCP4-panel: trin 3 er den nominelle luftmængde (gear 46-91 pr. ventilator). Trin 2 og 1 ligger én og to gearafstande under, og trin 4 er maksimum. Indblæsningen følger luftbalancen, når den står på Auto.", "data": {"extract": "Trin 3 udsugning (gear)", "supply": "Trin 3 indblæsning (gear)", "offset": "Gearafstand til trin 2 og 1", "max_extract": "Trin 4 maks. udsugning (gear)", "max_supply": "Trin 4 maks. indblæsning (gear)"}},
-      "fan_profiles": {
-        "title": "Ventilationsprofiler 1-6 (6-trins styring)",
-        "description": "Indblæsningen må ikke være højere end udsugningen, og begge værdier må ikke falde fra niveau 1 til 6.",
+      "mk2": {
+        "title": "Dantherm-anlæg over Modbus TCP",
+        "description": "Forbind direkte til et Dantherm-anlæg med Dantherm Residential Modbus-kortet – HCH5 MKII, RCV, HCV eller HCC – over Modbus TCP. Du får målinger og styring af driftstilstand, ventilationstrin, bypass, filter og alarmer – uden Raspberry Pi.",
         "data": {
-          "profile_1_name": "Niveau 1 navn", "profile_1_extract": "Niveau 1 udsugning %", "profile_1_supply": "Niveau 1 indblæsning %",
-          "profile_2_name": "Niveau 2 navn", "profile_2_extract": "Niveau 2 udsugning %", "profile_2_supply": "Niveau 2 indblæsning %",
-          "profile_3_name": "Niveau 3 navn", "profile_3_extract": "Niveau 3 udsugning %", "profile_3_supply": "Niveau 3 indblæsning %",
-          "profile_4_name": "Niveau 4 navn", "profile_4_extract": "Niveau 4 udsugning %", "profile_4_supply": "Niveau 4 indblæsning %",
-          "profile_5_name": "Niveau 5 navn", "profile_5_extract": "Niveau 5 udsugning %", "profile_5_supply": "Niveau 5 indblæsning %",
-          "profile_6_name": "Niveau 6 navn", "profile_6_extract": "Niveau 6 udsugning %", "profile_6_supply": "Niveau 6 indblæsning %"
+          "host": "IP-adresse",
+          "port": "Port",
+          "unit_id": "Modbus-adresse"
         }
       },
-      "rooms_menu": {
-        "title": "Smart Auto-sensorer og rum",
-        "description": "Tilføj de rum og sensorer du vil bruge. Et rum kan styre ventilationen eller kun overvåges. Prioritet justerer hvor tidligt/stærkt rummet påvirker ventilationen; alvorligt dårlige målinger ignoreres aldrig.",
-        "menu_options": {
-          "add_room": "Tilføj rum",
-          "edit_room": "Redigér rum",
-          "remove_room": "Fjern rum",
-          "finish_rooms": "Gem rum og gå tilbage"
+      "serial": {
+        "title": "Lokal USB-RS485-adapter",
+        "description": "Angiv USB-adapterens stabile enhedssti, helst /dev/serial/by-id/....",
+        "data": {
+          "serial_port": "Seriel enhedssti"
         }
-      },
-      "add_room": {
-        "title": "Tilføj Smart Auto-rum",
-        "description": "Vælg mindst én temperatur-, luftfugtigheds-, CO₂- eller PM2.5-sensor. Kun understøttede sensorer vises: temperatur i °C, luftfugtighed i %, CO₂ og PM2.5 i µg/m³. PM2.5 bruges kun, hvis det er slået til på Pi'en.",
-        "data": {"name": "Rumnavn", "enabled": "Aktiv", "control": "Brug til styring", "priority": "Prioritet", "temperature": "Temperatursensor (valgfri)", "humidity": "Luftfugtighedssensor (valgfri)", "co2": "CO₂-sensor (valgfri)", "pm25": "PM2.5-sensor (valgfri)", "room_type": "Rumtype"}
-      },
-      "edit_room": {"title": "Vælg rum der skal redigeres", "data": {"room": "Rum"}},
-      "room_detail": {
-        "title": "Redigér Smart Auto-rum",
-        "description": "Deaktiver et rum midlertidigt, brug det kun til overvågning, eller justér prioriteten uden at ændre controllerkoden. Kun understøttede sensorer vises: temperatur i °C, luftfugtighed i %, CO₂ og PM2.5 i µg/m³. PM2.5 bruges kun, hvis det er slået til på Pi'en.",
-        "data": {"name": "Rumnavn", "enabled": "Aktiv", "control": "Brug til styring", "priority": "Prioritet", "temperature": "Temperatursensor (valgfri)", "humidity": "Luftfugtighedssensor (valgfri)", "co2": "CO₂-sensor (valgfri)", "pm25": "PM2.5-sensor (valgfri)", "room_type": "Rumtype"}
-      },
-      "remove_room": {"title": "Fjern Smart Auto-rum", "description": "Fjerner kun rummet fra Dantherm Smart Auto. Den valgte Home Assistant-sensor slettes ikke.", "data": {"room": "Rum"}},
-      "finish_rooms": {"title": "Gem Smart Auto-rum"},
-      "tcp": {"title": "RS485 over TCP", "description": "Indtast IP-adressen og TCP-porten på Raspberry Pi-gatewayen eller RS485-til-Ethernet-adapteren.", "data": {"host": "IP-adresse eller værtsnavn", "port": "TCP-port"}},
-      "mk2": {"title": "Dantherm-anlæg over Modbus TCP", "description": "Forbind direkte til et Dantherm-anlæg med Dantherm Residential Modbus-kortet – HCH5 MKII, RCV, HCV eller HCC – over Modbus TCP. Du får målinger og styring af driftstilstand, ventilationstrin, bypass, filter og alarmer – uden Raspberry Pi.", "data": {"host": "IP-adresse", "port": "Port", "unit_id": "Modbus-adresse"}},
-      "serial": {"title": "Lokal USB-RS485-adapter", "description": "Angiv USB-adapterens stabile enhedssti, helst /dev/serial/by-id/....", "data": {"serial_port": "Seriel enhedssti"}}
+      }
     },
     "error": {
       "cannot_connect": "Forbindelsen kunne ikke valideres, eller der blev ikke modtaget gyldig Dantherm-trafik.",
       "controller_cannot_connect": "Controller API kunne ikke kontaktes eller godkende tokenet.",
-      "controller_update_failed": "Controlleren afviste ændringen, eller forbindelsen blev afbrudt.",
-      "controller_rejected": "Controlleren afviste ændringen: {error}",
-      "required": "Feltet skal udfyldes for den valgte forbindelsestype.",
-      "room_name_duplicate": "Der findes allerede et Smart Auto-rum med dette navn.",
-      "room_requires_sensor": "Vælg mindst én sensor til rummet.",
-      "invalid_priority": "Vælg en gyldig prioritet."
+      "required": "Feltet skal udfyldes for den valgte forbindelsestype."
     }
   },
   "issues": {

@@ -100,6 +100,23 @@ class ControllerApiClient:
         self._update(state)
         return state
 
+    async def async_send_catalog(
+        self, areas: list[dict[str, object]], legacy_rooms: dict[str, dict[str, object]] | None = None,
+    ) -> dict[str, object]:
+        """HA's areas and sensors for the WebUI page "Rum"; answers with the room setup.
+
+        ``legacy_rooms`` (the old options-flow rooms) lets the Pi take them
+        over once, if it has no room setup yet.
+        """
+        payload: dict[str, object] = {"source": "home_assistant", "areas": areas}
+        if legacy_rooms:
+            payload["legacy_rooms"] = legacy_rooms
+        return await self._json("POST", "/api/controller/ha-catalog", payload)
+
+    async def async_get_rooms(self) -> dict[str, object]:
+        """The room setup on the Pi (rooms, catalogue age)."""
+        return await self._json("GET", "/api/controller/rooms?catalog=0")
+
     async def async_send_signals(self, signals: dict[str, object], valid_for_s: int = 300) -> dict[str, object]:
         """Leased external switches, e.g. the automatic fireplace signal."""
         state = await self._json(

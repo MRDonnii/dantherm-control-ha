@@ -151,76 +151,51 @@
       },
       "controller_menu": {
         "title": "Controller setup",
-        "description": "Values are read directly from the Pi controller. Changes are stored on the Pi, which remains the source of truth.",
+        "description": "Here you only choose which Home Assistant data is sent to the Pi. The ventilation itself (rooms, steps, humidity and CO₂, afterheat, night, free cooling) is set up in one place: the Dantherm WebUI at {url}.",
         "menu_options": {
-          "controller_sensors": "Sensors sent to the controller",
-          "controller_settings": "Operation, Smart Auto and afterheat",
-          "fan_profiles": "Fan steps",
-          "rooms_menu": "Smart Auto rooms",
+          "controller_sensors": "Energy and weather data for the controller",
+          "rooms_info": "Rooms (set up in the Dantherm WebUI)",
+          "webui_info": "Operation, steps and air quality (set up in the Dantherm WebUI)",
           "finish_controller": "Save integration settings"
         }
       },
-      "controller_settings": {
-        "title": "Controller parameters",
-        "description": "These values are stored directly on the Raspberry Pi controller.",
+      "rooms_info": {
+        "title": "Rooms are now set up in the Dantherm WebUI",
+        "description": "Rooms are now set up in the Dantherm WebUI → Setup → Rooms: {url}\n\nHome Assistant automatically sends every area with temperature, humidity, CO₂ and PM2.5 sensors to the Pi so you can pick them there. The {count} rooms set up here before are moved to the Pi once and are only used until the Pi has its own room setup."
+      },
+      "webui_info": {
+        "title": "Settings live in the Dantherm WebUI",
+        "description": "Operation, ventilation steps, humidity and CO₂, afterheat, night and free cooling are set up in the Dantherm WebUI → Setup → Settings: {url}\n\nHome Assistant still has entities to control the unit from automations and dashboards."
+      },
+      "tcp": {
+        "title": "RS485 over TCP",
+        "description": "Enter the IP address and TCP port of the Raspberry Pi gateway or RS485-to-Ethernet adapter.",
         "data": {
-          "mode": "Operating mode", "manual_level": "Manual level",
-          "local_normal_level": "Local Auto normal level", "local_min_level": "Local Auto minimum", "local_max_level": "Local Auto maximum",
-          "rh_setpoint": "RH setpoint", "rh_hysteresis": "RH hysteresis", "co2_setpoint": "CO2 setpoint", "co2_hysteresis": "CO2 hysteresis",
-          "auto_step_rh": "RH per ventilation level", "auto_step_co2": "CO2 per ventilation level",
-          "downshift_delay_seconds": "Downshift delay (seconds)", "boost_hold_seconds": "Boost hold (seconds)",
-          "ha_timeout_seconds": "HA timeout (seconds)", "afterheat_setpoint": "Afterheat setpoint"
+          "host": "IP address or host name",
+          "port": "TCP port"
         }
       },
-      "fan_steps": {"title": "Dantherm 4 steps", "description": "Commission as on Dantherm's HCP4 panel: step 3 is the nominal airflow (gear 46-91 per fan). Steps 2 and 1 lie one and two offsets below, and step 4 is the maximum. Supply follows the air balance when it is on Auto.", "data": {"extract": "Step 3 extract (gear)", "supply": "Step 3 supply (gear)", "offset": "Offset to steps 2 and 1", "max_extract": "Step 4 maximum extract (gear)", "max_supply": "Step 4 maximum supply (gear)"}},
-      "fan_profiles": {
-        "title": "Ventilation profiles 1-6 (six-step control)",
-        "description": "Extract must be higher than supply, and both values must increase from level 1 through 6.",
+      "mk2": {
+        "title": "Dantherm unit over Modbus TCP",
+        "description": "Connect directly to a Dantherm unit with the Dantherm Residential Modbus map – HCH5 MKII, RCV, HCV or HCC – over Modbus TCP. You get readings and control of operation mode, fan step, bypass, filter and alarms – no Raspberry Pi needed.",
         "data": {
-          "profile_1_name": "Level 1 name", "profile_1_extract": "Level 1 extract %", "profile_1_supply": "Level 1 supply %",
-          "profile_2_name": "Level 2 name", "profile_2_extract": "Level 2 extract %", "profile_2_supply": "Level 2 supply %",
-          "profile_3_name": "Level 3 name", "profile_3_extract": "Level 3 extract %", "profile_3_supply": "Level 3 supply %",
-          "profile_4_name": "Level 4 name", "profile_4_extract": "Level 4 extract %", "profile_4_supply": "Level 4 supply %",
-          "profile_5_name": "Level 5 name", "profile_5_extract": "Level 5 extract %", "profile_5_supply": "Level 5 supply %",
-          "profile_6_name": "Level 6 name", "profile_6_extract": "Level 6 extract %", "profile_6_supply": "Level 6 supply %"
+          "host": "IP address",
+          "port": "Port",
+          "unit_id": "Modbus address"
         }
       },
-      "rooms_menu": {
-        "title": "Smart Auto sensors and rooms",
-        "description": "Add any rooms and sensors you want. A room can control ventilation or be monitor-only. Priority changes how early/strongly a room affects ventilation; seriously poor readings are never ignored.",
-        "menu_options": {
-          "add_room": "Add room",
-          "edit_room": "Edit room",
-          "remove_room": "Remove room",
-          "finish_rooms": "Save rooms and go back"
+      "serial": {
+        "title": "Local USB-RS485 adapter",
+        "description": "Enter the stable device path of the USB adapter, preferably /dev/serial/by-id/....",
+        "data": {
+          "serial_port": "Serial device path"
         }
-      },
-      "add_room": {
-        "title": "Add Smart Auto room",
-        "description": "Select at least one temperature, humidity, CO₂ or PM2.5 sensor. Only supported sensors are listed: temperature in °C, humidity in %, CO₂ and PM2.5 in µg/m³. PM2.5 is only used when it is enabled on the Pi.",
-        "data": {"name": "Room name", "enabled": "Enabled", "control": "Use for control", "priority": "Priority", "temperature": "Temperature sensor (optional)", "humidity": "Humidity sensor (optional)", "co2": "CO₂ sensor (optional)", "pm25": "PM2.5 sensor (optional)", "room_type": "Room type"}
-      },
-      "edit_room": {"title": "Choose room to edit", "data": {"room": "Room"}},
-      "room_detail": {
-        "title": "Edit Smart Auto room",
-        "description": "Temporarily disable a room, make it monitor-only, or change priority without changing controller code. Only supported sensors are listed: temperature in °C, humidity in %, CO₂ and PM2.5 in µg/m³. PM2.5 is only used when it is enabled on the Pi.",
-        "data": {"name": "Room name", "enabled": "Enabled", "control": "Use for control", "priority": "Priority", "temperature": "Temperature sensor (optional)", "humidity": "Humidity sensor (optional)", "co2": "CO₂ sensor (optional)", "pm25": "PM2.5 sensor (optional)", "room_type": "Room type"}
-      },
-      "remove_room": {"title": "Remove Smart Auto room", "description": "Only removes the room from Dantherm Smart Auto. The selected Home Assistant sensor is not deleted.", "data": {"room": "Room"}},
-      "finish_rooms": {"title": "Save Smart Auto rooms"},
-      "tcp": {"title": "RS485 over TCP", "description": "Enter the IP address and TCP port of the Raspberry Pi gateway or RS485-to-Ethernet adapter.", "data": {"host": "IP address or host name", "port": "TCP port"}},
-      "mk2": {"title": "Dantherm unit over Modbus TCP", "description": "Connect directly to a Dantherm unit with the Dantherm Residential Modbus map – HCH5 MKII, RCV, HCV or HCC – over Modbus TCP. You get readings and control of operation mode, fan step, bypass, filter and alarms – no Raspberry Pi needed.", "data": {"host": "IP address", "port": "Port", "unit_id": "Modbus address"}},
-      "serial": {"title": "Local USB-RS485 adapter", "description": "Enter the stable device path of the USB adapter, preferably /dev/serial/by-id/....", "data": {"serial_port": "Serial device path"}}
+      }
     },
     "error": {
       "cannot_connect": "The connection could not be validated, or no valid Dantherm traffic was received.",
       "controller_cannot_connect": "The controller API could not be reached or the token could not be authenticated.",
-      "controller_update_failed": "The controller rejected the change or the connection was interrupted.",
-      "controller_rejected": "The controller rejected the change: {error}",
-      "required": "This field is required for the selected connection type.",
-      "room_name_duplicate": "A Smart Auto room with this name already exists.",
-      "room_requires_sensor": "Select at least one sensor for the room.",
-      "invalid_priority": "Select a valid priority."
+      "required": "This field is required for the selected connection type."
     }
   },
   "issues": {

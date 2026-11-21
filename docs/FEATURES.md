@@ -25,8 +25,9 @@ Controller entities appear only when the separate Dantherm Control Raspberry Pi 
 
 ## Bring Home Assistant sensors into Smart Auto
 
-- Configure up to 32 rooms with a name, type (`auto`, `normal`, `bathroom`), priority and control/monitor-only setting. Choose optional temperature, humidity, CO₂ and PM2.5 sensors per room.
-- Entity pickers list supported units and device classes for each field. Unknown, unavailable and out-of-range values are omitted instead of making the Pi reject the full update. The sent room data includes the source entity IDs.
+- Rooms are set up in the Pi's WebUI (**Opsætning → Rum**, up to 32 rooms): HA area, temperature, humidity, CO₂ and PM2.5 sensor, room type (normal, bedroom, bathroom, kitchen, stove, outdoor, extract room, not ventilated), priority, control on/off and the room the unit's own sensor sits in.
+- Home Assistant sends a catalogue of its areas and their climate sensors to the Pi and sends the values of the sensors chosen there. Unknown, unavailable and out-of-range values are omitted instead of making the Pi reject the full update. The sent room data includes the source entity IDs.
+- Legacy: rooms from the old Options UI are moved to the Pi once and only used while the Pi has no room setup.
 - The Pi combines valid room values with its own sensors. Leased inputs expire when Home Assistant stops sending them; the Pi then falls back to local inputs. PM2.5 support requires a compatible Pi controller; Pi version 1.3.3 and newer include it.
 
 ## Weather from Home Assistant

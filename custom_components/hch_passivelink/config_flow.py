@@ -12,7 +12,7 @@ from homeassistant.helpers import selector
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .client import Mk2Client, PassiveLinkClient, PassiveSerialClient
-from .controller_api import ControllerApiClient, ControllerRejectedError
+from .controller_api import ControllerApiClient
 from .sensor_support import (
     KIND_CO2,
     KIND_ENERGY,
@@ -191,13 +191,16 @@ class PassiveLinkConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
 
 class PassiveLinkOptionsFlow(config_entries.OptionsFlow):
-    """Configure transport, Pi controller API and dynamic HA room sources."""
+    """Configure the connection, the Pi controller API and the HA sensors sent to the Pi.
+
+    Rooms and every ventilation setting live in the Dantherm WebUI; the old
+    options-flow rooms are only kept (unchanged) so the Pi can take them over.
+    """
 
     def __init__(self, config_entry) -> None:
         self._config_entry = config_entry
         self._pending: dict = {}
         self._rooms = self._load_rooms({**config_entry.data, **config_entry.options})
-        self._selected_room: int | None = None
         self._controller_client: ControllerApiClient | None = None
         self._controller_state: dict[str, object] = {}
 
@@ -269,66 +272,6 @@ class PassiveLinkOptionsFlow(config_entries.OptionsFlow):
                 self.hass.states.async_all("sensor"), kind, keep=selected
             ),
         ))
-
-    def _room_schema(self, room: dict[str, object] | None = None) -> vol.Schema:
-        room = room or {}
-        items: dict = {
-            vol.Required("name", default=str(room.get("name", ""))): str,
-            vol.Required("enabled", default=bool(room.get("enabled", True))): bool,
-            vol.Required("control", default=bool(room.get("control", True))): bool,
-            vol.Required("priority", default=str(room.get("priority", "auto"))): vol.In({
-                "auto": "Auto",
-                "low": "Lav",
-                "normal": "Normal",
-                "high": "Høj",
-                "critical": "Kritisk",
-            }),
-            vol.Required("room_type", default=str(room.get("room_type", "auto"))): vol.In({
-                "auto": "Auto (ud fra rumnavnet)",
-                "normal": "Normalt rum",
-                "bathroom": "Badeværelse",
-            }),
-        }
-        for key, kind in ROOM_SENSOR_KINDS.items():
-            existing = room.get(key)
-            marker = vol.Optional(key, default=existing) if existing else vol.Optional(key)
-            items[marker] = self._entity_selector(kind, existing)
-        return vol.Schema(items)
-
-    def _validate_room(self, user_input: dict, *, exclude_index: int | None = None) -> tuple[dict, dict]:
-        errors: dict = {}
-        name = str(user_input.get("name", "")).strip()
-        if not name:
-            errors["name"] = "required"
-        elif any(
-            index != exclude_index and str(room.get("name", "")).casefold() == name.casefold()
-            for index, room in enumerate(self._rooms)
-        ):
-            errors["name"] = "room_name_duplicate"
-
-        sensors = {
-            key: str(user_input.get(key, "") or "").strip()
-            for key in ROOM_SENSOR_KINDS
-        }
-        if not any(sensors.values()):
-            errors["base"] = "room_requires_sensor"
-
-        priority = str(user_input.get("priority", "auto"))
-        if priority not in SMART_ROOM_PRIORITIES:
-            errors["priority"] = "invalid_priority"
-        room_type = str(user_input.get("room_type", "auto"))
-        if room_type not in SMART_ROOM_TYPES:
-            room_type = "auto"
-
-        room: dict[str, object] = {
-            "name": name[:64],
-            "enabled": bool(user_input.get("enabled", True)),
-            "control": bool(user_input.get("control", True)),
-            "priority": priority,
-            "room_type": room_type,
-        }
-        room.update({key: value for key, value in sensors.items() if value})
-        return room, errors
 
     async def async_step_init(self, user_input: dict | None = None) -> FlowResult:
         current = self._current
@@ -506,198 +449,42 @@ class PassiveLinkOptionsFlow(config_entries.OptionsFlow):
             },
         )
 
+    def _webui_url(self, page: str = "") -> str:
+        """The Dantherm WebUI on the Pi, served on the controller port."""
+        host = str(self._pending.get(CONF_CONTROLLER_HOST) or self._current.get(CONF_CONTROLLER_HOST) or "").strip()
+        port = self._pending.get(CONF_CONTROLLER_PORT) or self._current.get(CONF_CONTROLLER_PORT) or DEFAULT_CONTROLLER_PORT
+        if not host:
+            return "Dantherm-WebUI"
+        return f"http://{host}:{int(port)}/#/{page}" if page else f"http://{host}:{int(port)}/"
+
     async def async_step_controller_menu(self, user_input: dict | None = None) -> FlowResult:
+        """What Home Assistant sets up. Everything about the ventilation itself is set up in the WebUI."""
         del user_input
-        options = ["controller_sensors", "controller_settings", "fan_profiles"]
-        if self._pending.get(CONF_SMART_ROOMS_ENABLED, False):
-            options.append("rooms_menu")
-        options.append("finish_controller")
-        return self.async_show_menu(step_id="controller_menu", menu_options=options)
-
-    async def async_step_controller_settings(self, user_input: dict | None = None) -> FlowResult:
-        errors = {}
-        # The Pi's own reason when it refuses a value (e.g. the afterheat frost lock).
-        placeholders = {"error": ""}
-        state = self._controller_state
-        if user_input is not None:
-            try:
-                if self._controller_client is None:
-                    raise ConnectionError("Controller API is not connected")
-                self._controller_state = await self._controller_client.async_command(dict(user_input))
-            except ControllerRejectedError as error:
-                errors["base"] = "controller_rejected"
-                placeholders["error"] = str(error)
-            except (OSError, ConnectionError, asyncio.TimeoutError):
-                errors["base"] = "controller_update_failed"
-            else:
-                return await self.async_step_controller_menu()
-
-        # Highest step: 4 with Dantherm steps (HCH5 Control 1.4.0+), else 6.
-        top = int(state.get("max_level") or 6)
-        number = lambda minimum, maximum, step=1: selector.NumberSelector(
-            selector.NumberSelectorConfig(
-                min=minimum, max=maximum, step=step,
-                mode=selector.NumberSelectorMode.BOX,
-            )
+        return self.async_show_menu(
+            step_id="controller_menu",
+            menu_options=["controller_sensors", "rooms_info", "webui_info", "finish_controller"],
+            description_placeholders={"url": self._webui_url()},
         )
-        schema = vol.Schema({
-            vol.Required("mode", default=state.get("mode", "local_auto")): vol.In({
-                "local_auto": "Local Auto", "smart_auto": "Smart Auto", "manual": "Manual",
-            }),
-            vol.Required("manual_level", default=state.get("manual_level", 3)): number(1, top),
-            vol.Required("local_normal_level", default=state.get("local_normal_level", 3)): number(1, top),
-            vol.Required("local_min_level", default=state.get("local_min_level", 1)): number(1, top),
-            vol.Required("local_max_level", default=state.get("local_max_level", top)): number(1, top),
-            vol.Required("rh_setpoint", default=state.get("rh_setpoint", 50)): number(25, 80),
-            vol.Required("rh_hysteresis", default=state.get("rh_hysteresis", 3)): number(1, 10),
-            vol.Required("co2_setpoint", default=state.get("co2_setpoint", 800)): number(500, 2000, 50),
-            vol.Required("co2_hysteresis", default=state.get("co2_hysteresis", 100)): number(25, 500, 25),
-            vol.Required("auto_step_rh", default=state.get("auto_step_rh", 5)): number(2, 20),
-            vol.Required("auto_step_co2", default=state.get("auto_step_co2", 200)): number(50, 1000, 50),
-            vol.Required("downshift_delay_seconds", default=state.get("downshift_delay_seconds", 300)): number(30, 3600, 30),
-            vol.Required("boost_hold_seconds", default=state.get("boost_hold_seconds", 600)): number(60, 3600, 60),
-            vol.Required("ha_timeout_seconds", default=state.get("ha_timeout_seconds", 300)): number(60, 3600, 30),
-            vol.Required("afterheat_setpoint", default=state.get("afterheat_setpoint", 20)): number(18, 30),
-        })
+
+    async def async_step_rooms_info(self, user_input: dict | None = None) -> FlowResult:
+        """Rooms are set up in one place only: the Dantherm WebUI (Opsætning → Rum)."""
+        if user_input is not None:
+            return await self.async_step_controller_menu()
         return self.async_show_form(
-            step_id="controller_settings", data_schema=schema, errors=errors,
-            description_placeholders=placeholders,
+            step_id="rooms_info",
+            data_schema=vol.Schema({}),
+            description_placeholders={"url": self._webui_url("rooms"), "count": str(len(self._rooms))},
         )
 
-    async def async_step_fan_profiles(self, user_input: dict | None = None) -> FlowResult:
-        if self._controller_state.get("fan_step_count") == 4:
-            return await self.async_step_fan_steps(user_input)
-        errors = {}
-        profiles = self._controller_state.get("profiles") or {}
+    async def async_step_webui_info(self, user_input: dict | None = None) -> FlowResult:
+        """Operation, steps, air quality and afterheat are set up in the Dantherm WebUI."""
         if user_input is not None:
-            patch = {"profiles": {
-                str(level): {
-                    "name": str(user_input[f"profile_{level}_name"]).strip(),
-                    "extract": int(user_input[f"profile_{level}_extract"]),
-                    "supply": int(user_input[f"profile_{level}_supply"]),
-                }
-                for level in range(1, 7)
-            }}
-            try:
-                if self._controller_client is None:
-                    raise ConnectionError("Controller API is not connected")
-                self._controller_state = await self._controller_client.async_command(patch)
-            except (OSError, ConnectionError, asyncio.TimeoutError):
-                errors["base"] = "controller_update_failed"
-            else:
-                return await self.async_step_controller_menu()
-
-        fields = {}
-        defaults = (("Lav", 25, 13), ("Lav+", 40, 28), ("Normal", 55, 43),
-                    ("Høj", 70, 58), ("Høj+", 85, 73), ("Boost", 100, 88))
-        for level, (name, extract, supply) in enumerate(defaults, 1):
-            current = profiles.get(str(level)) or profiles.get(level) or {}
-            fields[vol.Required(
-                f"profile_{level}_name", default=current.get("name", name)
-            )] = str
-            fields[vol.Required(
-                f"profile_{level}_extract", default=current.get("extract", extract)
-            )] = vol.All(vol.Coerce(int), vol.Range(min=1, max=100))
-            fields[vol.Required(
-                f"profile_{level}_supply", default=current.get("supply", supply)
-            )] = vol.All(vol.Coerce(int), vol.Range(min=1, max=100))
+            return await self.async_step_controller_menu()
         return self.async_show_form(
-            step_id="fan_profiles", data_schema=vol.Schema(fields), errors=errors
+            step_id="webui_info",
+            data_schema=vol.Schema({}),
+            description_placeholders={"url": self._webui_url("settings")},
         )
-
-    async def async_step_fan_steps(self, user_input: dict | None = None) -> FlowResult:
-        """Four Dantherm steps: commission step 3 per fan, the offset and step 4."""
-        errors = {}
-        settings = self._controller_state.get("fan_settings") or {}
-        if user_input is not None:
-            try:
-                if self._controller_client is None:
-                    raise ConnectionError("Controller API is not connected")
-                self._controller_state = await self._controller_client.async_command(
-                    {"fan_settings": {key: int(value) for key, value in user_input.items()}})
-            except (OSError, ConnectionError, asyncio.TimeoutError):
-                errors["base"] = "controller_update_failed"
-            else:
-                return await self.async_step_controller_menu()
-        gear = lambda minimum, maximum: vol.All(vol.Coerce(int), vol.Range(min=minimum, max=maximum))
-        fields = {
-            vol.Required("extract", default=settings.get("extract", 64)): gear(46, 91),
-            vol.Required("supply", default=settings.get("supply", 64)): gear(46, 91),
-            vol.Required("offset", default=settings.get("offset", 25)): gear(10, 30),
-            vol.Required("max_extract", default=settings.get("max_extract", 100)): gear(46, 100),
-            vol.Required("max_supply", default=settings.get("max_supply", 100)): gear(46, 100),
-        }
-        return self.async_show_form(step_id="fan_steps", data_schema=vol.Schema(fields), errors=errors)
-
-    async def async_step_rooms_menu(self, user_input: dict | None = None) -> FlowResult:
-        del user_input
-        options = []
-        if len(self._rooms) < MAX_SMART_ROOMS:
-            options.append("add_room")
-        if self._rooms:
-            options.extend(("edit_room", "remove_room"))
-        options.append("finish_rooms")
-        return self.async_show_menu(step_id="rooms_menu", menu_options=options)
-
-    async def async_step_add_room(self, user_input: dict | None = None) -> FlowResult:
-        errors = {}
-        if user_input is not None:
-            room, errors = self._validate_room(user_input)
-            if not errors:
-                self._rooms.append(room)
-                return await self.async_step_rooms_menu()
-        return self.async_show_form(
-            step_id="add_room",
-            data_schema=self._room_schema(),
-            errors=errors,
-        )
-
-    async def async_step_edit_room(self, user_input: dict | None = None) -> FlowResult:
-        if not self._rooms:
-            return await self.async_step_rooms_menu()
-        choices = {str(index): str(room["name"]) for index, room in enumerate(self._rooms)}
-        if user_input is not None:
-            self._selected_room = int(user_input["room"])
-            return await self.async_step_room_detail()
-        return self.async_show_form(
-            step_id="edit_room",
-            data_schema=vol.Schema({vol.Required("room"): vol.In(choices)}),
-        )
-
-    async def async_step_room_detail(self, user_input: dict | None = None) -> FlowResult:
-        if self._selected_room is None or self._selected_room >= len(self._rooms):
-            return await self.async_step_rooms_menu()
-        current = self._rooms[self._selected_room]
-        errors = {}
-        if user_input is not None:
-            room, errors = self._validate_room(user_input, exclude_index=self._selected_room)
-            if not errors:
-                self._rooms[self._selected_room] = room
-                self._selected_room = None
-                return await self.async_step_rooms_menu()
-        return self.async_show_form(
-            step_id="room_detail",
-            data_schema=self._room_schema(current),
-            errors=errors,
-        )
-
-    async def async_step_remove_room(self, user_input: dict | None = None) -> FlowResult:
-        if not self._rooms:
-            return await self.async_step_rooms_menu()
-        choices = {str(index): str(room["name"]) for index, room in enumerate(self._rooms)}
-        if user_input is not None:
-            index = int(user_input["room"])
-            if 0 <= index < len(self._rooms):
-                self._rooms.pop(index)
-            return await self.async_step_rooms_menu()
-        return self.async_show_form(
-            step_id="remove_room",
-            data_schema=vol.Schema({vol.Required("room"): vol.In(choices)}),
-        )
-
-    async def async_step_finish_rooms(self, user_input: dict | None = None) -> FlowResult:
-        del user_input
-        return await self.async_step_controller_menu()
 
     async def async_step_finish_controller(self, user_input: dict | None = None) -> FlowResult:
         del user_input
