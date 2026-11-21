@@ -23,7 +23,13 @@ from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
 
-from .controller_entity import AfterheatControlEntity, ControllerEntity
+from .controller_entity import (
+    AFTERHEAT_VALVE_KEY,
+    AfterheatControlEntity,
+    ControllerEntity,
+    afterheat_valve_percent,
+    has_afterheat_valve,
+)
 from .coordinator import PassiveLinkCoordinator
 from .entity import PI_KEYS, PREHEATER_KEYS, PassiveLinkEntity, async_add_entities_when_ready
 from .mk2_entities import Mk2AlarmSensor, Mk2OperatingHoursSensor, drop_mk1_only, is_mk2
@@ -373,6 +379,20 @@ class ControllerStatusSensor(ControllerEntity, SensorEntity):
         self._pending: float | None = None
         self._seen_state: object = None
         self._shown: float | None = None
+
+    @property
+    def available(self) -> bool:
+        if self.key != AFTERHEAT_VALVE_KEY:
+            return super().available
+        client = getattr(self.coordinator, "controller_client", None)
+        return bool(client and client.connected and has_afterheat_valve(self.coordinator.controller_state))
+
+    @property
+    def controller_value(self):
+        if self.key == AFTERHEAT_VALVE_KEY:
+            # Valve opening = HAC1 level x 10 %, also from a gateway that only sends the level.
+            return afterheat_valve_percent(self.coordinator.controller_state)
+        return super().controller_value
 
     @property
     def native_value(self):

@@ -28,7 +28,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DOMAIN
 from .entity import parent_link, sub_model
-from .controller_entity import ControllerEntity, has_afterheat_control
+from .controller_entity import ControllerEntity, afterheat_valve_percent, has_afterheat_control
 
 # HA 2026.11 renamed the climate temperature API to native_*; the old names
 # warn and stop working in 2027.11. Older HA (>= 2025.8) only knows the old ones.
@@ -55,7 +55,7 @@ class AfterheatClimate(ControllerEntity, ClimateEntity):
     # recorder here instead of writing a new attributes row every 5 s.
     _unrecorded_attributes = frozenset({
         "hac1_level", "level_wanted", "level_target", "level_max",
-        "control_active", "control_reason", "control_target",
+        "control_active", "control_reason", "control_target", "hac1_setpoint", "valve_percent",
     })
 
     def __init__(self, coordinator) -> None:
@@ -116,6 +116,9 @@ class AfterheatClimate(ControllerEntity, ClimateEntity):
                 "control_active": state.get("afterheat_control_active"),
                 "control_reason": state.get("afterheat_control_reason"),
                 "control_target": state.get("afterheat_target"),
+                # What the control sends HAC1 (moves while the Pi steers) and the valve opening.
+                "hac1_setpoint": state.get("afterheat_hac1_setpoint"),
+                "valve_percent": afterheat_valve_percent(state),
             })
         return attributes or None
 

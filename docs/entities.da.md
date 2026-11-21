@@ -49,7 +49,7 @@ Faktisk indblæsning og Effektivt ventilationsniveau.
 | Luft efter varmeflade (T2AH) | Lufttemperatur efter eftervarmefladen. |
 | Eftervarme antifrost (TFAH) | Vand-/frosttemperatur ved varmefladen; det er ikke luft før varmefladen. |
 | Luftdelta over varmeflade | Luft efter varmeflade minus indblæsning, kun fra samlet snapshot. |
-| Ventilåbning eftervarme | Observeret kommando 0-100; ikke en bekræftet fysisk ventilposition. |
+| Eftervarme ventil | Ventilåbning i % = HAC1's eftervarmetrin (register 101, 0-10 = 0-10 V til ventilmotoren) × 10, altså 10 % pr. trin. Det er den kommando HAC1 giver motoren, ikke en målt ventilposition. Ukendt, når trinnet ikke er læst for nylig. Register 209 ("Eftervarme aktiv") er kun tændt/slukket og siger ikke, hvor meget ventilen er åben. Klimaentiteten har samme værdi i attributten `valve_percent` og styringens setpunkt til HAC1 i `hac1_setpoint`, mens `control_target` er dit mål. |
 | Fremløb, retur, vand delta-T, varmeoverførsel og temperaturfølere forbundet | Valgfri DS18B20-forvarmeudvidelse. Fejl her påvirker ikke RS485-delen. |
 | Filterinterval, dage, restlevetid, status, alarm, seneste og antal skift | Lokal filtercyklus synkroniseret med observeret HCP4-data. Nulstilling skriver aldrig til bussen. |
 

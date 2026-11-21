@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import math
 
 from aiohttp import ClientError
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
@@ -86,6 +87,39 @@ AFTERHEAT_CONTROL_KEY = "afterheat_control_mode"
 
 def has_afterheat_control(state: dict) -> bool:
     return AFTERHEAT_CONTROL_KEY in state
+
+
+AFTERHEAT_VALVE_KEY = "actual_afterheat_valve_percent"
+# HAC1 register 101 (0..10 = 0-10 V to the valve actuator), as the gateway reports it.
+AFTERHEAT_LEVEL_KEYS = ("actual_afterheat_level", "afterheat_level")
+
+
+def _finite(value: object) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+        return None
+    return float(value)
+
+
+def has_afterheat_valve(state: dict) -> bool:
+    """Whether the Pi reports the valve opening, or a HAC1 level it can be derived from."""
+    return AFTERHEAT_VALVE_KEY in state or any(key in state for key in AFTERHEAT_LEVEL_KEYS)
+
+
+def afterheat_valve_percent(state: dict) -> int | None:
+    """The afterheat valve opening in % (0..100): the HAC1 level times 10, one level per volt.
+
+    The gateway sends it itself (and None while register 101 is stale); an older
+    gateway only sends the level, so it is derived from that. Register 209 is just
+    an on/off flag and never used here.
+    """
+    if AFTERHEAT_VALVE_KEY in state:
+        value = _finite(state.get(AFTERHEAT_VALVE_KEY))
+        return None if value is None else int(round(min(100.0, max(0.0, value))))
+    for key in AFTERHEAT_LEVEL_KEYS:
+        level = _finite(state.get(key))
+        if level is not None:
+            return int(round(min(10.0, max(0.0, level)) * 10))
+    return None
 
 
 class AfterheatControlEntity(ControllerEntity):
