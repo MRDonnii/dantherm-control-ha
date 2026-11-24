@@ -90,3 +90,67 @@ def test_all_sensor_ages_are_sent_even_when_forwarded_values_are_unchanged():
     # A second forwarding operation does not replace the original report time.
     again=SmartPassiveLinkCoordinator._room_payload(fake)['Stue']
     assert again['co2_age_s']>=payload['co2_age_s']
+
+
+def _missing(sources, values):
+    states = {
+        entity_id: SimpleNamespace(state=value, attributes={})
+        for entity_id, value in values.items()
+    }
+    fake = SimpleNamespace(
+        room_sources=sources,
+        hass=SimpleNamespace(states=SimpleNamespace(get=states.get)),
+    )
+    return SmartPassiveLinkCoordinator.missing_room_sensors(fake)
+
+
+def test_selected_unavailable_sensor_is_listed_as_missing():
+    sources = [{"name": "Køkken", "temperature": "sensor.t", "humidity": "sensor.rh",
+                "co2": "sensor.co2", "pm25": "sensor.pm25"}]
+    values = {"sensor.t": "21.5", "sensor.rh": "unavailable", "sensor.co2": "unknown",
+              "sensor.pm25": "abc"}
+    rooms = _payload(sources, values)
+    assert rooms["Køkken"]["temperature"] == 21.5
+    assert rooms["Køkken"]["missing_sensors"] == ["humidity", "co2", "pm25"]
+    assert _missing(sources, values) == {
+        "Køkken": {"humidity": "sensor.rh", "co2": "sensor.co2", "pm25": "sensor.pm25"}
+    }
+
+
+def test_unselected_sensor_is_not_listed():
+    sources = [{"name": "Stue", "temperature": "sensor.t", "humidity": ""}]
+    rooms = _payload(sources, {"sensor.t": "21"})
+    assert "missing_sensors" not in rooms["Stue"]
+    assert _missing(sources, {"sensor.t": "21"}) == {}
+
+
+def test_valid_sensors_are_not_listed():
+    sources = [{"name": "Stue", "temperature": "sensor.t", "humidity": "sensor.rh",
+                "co2": "sensor.co2"}]
+    values = {"sensor.t": "21", "sensor.rh": "45", "sensor.co2": "600"}
+    rooms = _payload(sources, values)
+    assert "missing_sensors" not in rooms["Stue"]
+    assert _missing(sources, values) == {}
+
+
+def test_removed_entity_is_listed_as_missing():
+    sources = [{"name": "Bad", "temperature": "sensor.t", "humidity": "sensor.gone"}]
+    rooms = _payload(sources, {"sensor.t": "22"})
+    assert rooms["Bad"]["missing_sensors"] == ["humidity"]
+    assert _missing(sources, {"sensor.t": "22"}) == {"Bad": {"humidity": "sensor.gone"}}
+
+
+def test_room_with_only_missing_sensors_stays_out_of_payload_but_is_reported():
+    sources = [{"name": "Kontor", "temperature": "sensor.gone", "co2": "sensor.co2"}]
+    values = {"sensor.co2": "unavailable"}
+    assert _payload(sources, values) == {}
+    assert _missing(sources, values) == {"Kontor": {"temperature": "sensor.gone", "co2": "sensor.co2"}}
+
+
+def test_missing_sensors_are_described_in_danish():
+    from hch_passivelink.smart_coordinator import describe_missing_sensors
+
+    assert describe_missing_sensors({"Køkken": {"humidity": "sensor.rh", "pm25": "sensor.pm"}}) == [
+        "Køkken: luftfugtighed (sensor.rh) mangler data",
+        "Køkken: PM2.5 (sensor.pm) mangler data",
+    ]

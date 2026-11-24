@@ -33,6 +33,57 @@ CATALOG_INTERVAL = timedelta(minutes=10)
 CATALOG_MAX_AGE_S = 900
 
 
+ROOM_SENSOR_LABELS = {
+    "temperature": "temperatur",
+    "humidity": "luftfugtighed",
+    "co2": "CO2",
+    "pm25": "PM2.5",
+}
+
+
+def room_readings(hass, source: dict[str, object]) -> tuple[dict[str, object], dict[str, str], dict[str, str]]:
+    """Valid values (with ages), their entities, and selected sensors without a valid value.
+
+    A sensor counts as missing only when one is selected for the kind and it is
+    gone from the state machine, unavailable/unknown, non-numeric or out of range.
+    """
+    values: dict[str, object] = {}
+    entities: dict[str, str] = {}
+    missing: dict[str, str] = {}
+    for kind, (minimum, maximum) in ROOM_SENSOR_RANGES.items():
+        entity_id = source.get(kind)
+        if not entity_id:
+            continue
+        state = hass.states.get(entity_id)
+        if state is None or state.state in {"unknown", "unavailable", "none", ""}:
+            missing[kind] = str(entity_id)
+            continue
+        try:
+            value = float(state.state)
+        except (TypeError, ValueError):
+            missing[kind] = str(entity_id)
+            continue
+        # The Pi rejects the whole message on one out-of-range value.
+        if not minimum <= value <= maximum:
+            missing[kind] = str(entity_id)
+            continue
+        values[kind] = value
+        entities[kind] = str(entity_id)
+        age = reported_age_seconds(state, dt_util.utcnow())
+        if age is not None:
+            values[f"{kind}_age_s"] = age
+    return values, entities, missing
+
+
+def describe_missing_sensors(missing: dict[str, dict[str, str]]) -> list[str]:
+    """Danish lines for the UI, e.g. "Køkken: luftfugtighed (sensor.rh) mangler data"."""
+    return [
+        f"{room}: {ROOM_SENSOR_LABELS.get(kind, kind)} ({entity_id}) mangler data"
+        for room, kinds in missing.items()
+        for kind, entity_id in kinds.items()
+    ]
+
+
 class SmartPassiveLinkCoordinator(PassiveLinkCoordinator):
     """Keep PassiveLink receive-only while adding a separate Pi controller API."""
 
@@ -141,31 +192,36 @@ class SmartPassiveLinkCoordinator(PassiveLinkCoordinator):
                 "priority": str(source.get("priority") or "auto"),
                 "room_type": str(source.get("room_type") or "auto"),
             }
-            # Lets the Pi show which HA sensor each value came from.
-            entities: dict[str, str] = {}
-            for kind, (minimum, maximum) in ROOM_SENSOR_RANGES.items():
-                entity_id = source.get(kind)
-                if not entity_id:
-                    continue
-                state = self.hass.states.get(entity_id)
-                if state is None or state.state in {"unknown", "unavailable", "none", ""}:
-                    continue
-                try:
-                    value = float(state.state)
-                except (TypeError, ValueError):
-                    continue
-                # The Pi rejects the whole message on one out-of-range value.
-                if not minimum <= value <= maximum:
-                    continue
-                values[kind] = value
-                entities[kind] = str(entity_id)
-                age = reported_age_seconds(state, dt_util.utcnow())
-                if age is not None:
-                    values[f"{kind}_age_s"] = age
+            readings, entities, missing = room_readings(self.hass, source)
+            values.update(readings)
+            # A room without one valid value stays out: an older Pi rejects the
+            # whole message for a room it does not know with no measurements.
             if entities:
+                # Lets the Pi show which HA sensor each value came from.
                 values["entities"] = entities
+                if missing:
+                    # Selected sensors without a valid value right now, so the Pi
+                    # can tell them from kinds no sensor was chosen for. Older Pi
+                    # versions ignore unknown keys.
+                    values["missing_sensors"] = list(missing)
                 rooms[name] = values
         return rooms
+
+    def missing_room_sensors(self) -> dict[str, dict[str, str]]:
+        """Selected room sensors without a valid value: {room: {kind: entity_id}}.
+
+        Also covers rooms where every selected sensor is down, which the
+        payload leaves out entirely.
+        """
+        result: dict[str, dict[str, str]] = {}
+        for source in SmartPassiveLinkCoordinator.active_room_sources(self):
+            name = str(source.get("name") or "").strip()
+            if not name:
+                continue
+            _readings, _entities, missing = room_readings(self.hass, source)
+            if missing:
+                result[name] = missing
+        return result
 
     def active_room_sources(self) -> list[dict[str, object]]:
         """The rooms set up on the Pi, or the old options-flow rooms until the Pi has some."""

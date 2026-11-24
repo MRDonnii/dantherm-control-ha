@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.9.0-beta.15
+
+- Send for hvert rum feltet `missing_sensors` med de målingstyper (`temperature`, `humidity`, `co2`, `pm25`), hvor en valgt sensor er utilgængelig, ukendt, ikke-numerisk, uden for området eller fjernet fra HA. Typer uden valgt sensor tælles ikke med, og feltet udelades, når intet mangler.
+- Vis manglende valgte sensorer på **Smart Auto input online** (attributten `manglende_sensorer`) og i diagnosticeringen.
+- Pi 1.13.0-beta.5 viser advarslen; ældre Pi-versioner ignorerer feltet. Rumbeskeden er ellers uændret. Genstart Home Assistant efter installationen.
+
+Se [release notes](docs/releases/0.9.0-beta.15.md).
+
 ## 0.9.0-beta.14
 
 - Slå hovedenheden og Pi-controlleren op med Home Assistant's nye `async_get_device_by_identifier` inden for integrationens egen post. Det udfasede `async_get_device` (fjernes i HA 2027.8) bruges kun på HA før 2026.8.

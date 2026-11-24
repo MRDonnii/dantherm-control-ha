@@ -9,6 +9,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from .controller_entity import ControllerEntity
 from .entity import PI_KEYS, PREHEATER_KEYS, PassiveLinkEntity, async_add_entities_when_ready
 from .mk2_entities import drop_mk1_only
+from .smart_coordinator import describe_missing_sensors
 
 DESCRIPTIONS = (
     BinarySensorEntityDescription(key="bypass_active", translation_key="bypass_active", device_class=BinarySensorDeviceClass.OPENING),
@@ -75,6 +76,25 @@ class ControllerStatusBinarySensor(ControllerEntity, BinarySensorEntity):
         return bool(value) if value is not None else None
 
 
+class SmartInputsOnlineBinarySensor(ControllerStatusBinarySensor):
+    """The Pi's view of HA's room inputs, plus selected HA sensors without data.
+
+    The Pi can be online on a fresh temperature while a chosen humidity, CO2
+    or PM2.5 sensor is down; the attributes name those sensors.
+    """
+
+    @property
+    def extra_state_attributes(self) -> dict[str, object] | None:
+        coordinator = self.coordinator
+        if not getattr(coordinator, "rooms_enabled", False) or not hasattr(coordinator, "missing_room_sensors"):
+            return None
+        missing = coordinator.missing_room_sensors()
+        return {
+            "manglende_sensorer": describe_missing_sensors(missing),
+            "missing_sensors": {room: sorted(kinds) for room, kinds in missing.items()},
+        }
+
+
 class AfterheatFrostLockBinarySensor(ControllerStatusBinarySensor):
     """On while the Pi keeps the attic afterheat coil from being switched off.
 
@@ -110,7 +130,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     entities = drop_mk1_only(coordinator, entities)
     if coordinator.controller_client is not None:
         entities.extend(
-            ControllerStatusBinarySensor(coordinator, key, name, device_class, category, icon)
+            (SmartInputsOnlineBinarySensor if key == "smart_inputs_online" else ControllerStatusBinarySensor)(
+                coordinator, key, name, device_class, category, icon
+            )
             for key, name, device_class, category, icon in CONTROLLER_BINARY_SPECS
         )
         entities.append(AfterheatFrostLockBinarySensor(coordinator))
