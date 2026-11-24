@@ -11,6 +11,7 @@ from homeassistant.helpers import issue_registry as ir
 
 from .client import Mk2Client, PassiveLinkClient, PassiveSerialClient
 from .controller_api import ControllerApiClient
+from .device_lookup import find_entry_device
 from .const import (
     CONF_CONNECTION_TYPE,
     CONF_HOST,
@@ -226,8 +227,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: PassiveLinkConfigEntry) 
     device_registry = dr.async_get(hass)
     # Devices that already exist keep their names (entity_id prefixes stay
     # consistent); only new installations get the new names.
-    existing_main = device_registry.async_get_device(identifiers={(DOMAIN, "hch5_mk1_hac1")})
-    existing_controller = device_registry.async_get_device(identifiers={(DOMAIN, "hch5_pi_controller")})
+    existing_main = find_entry_device(device_registry, (DOMAIN, "hch5_mk1_hac1"), entry.entry_id)
+    existing_controller = find_entry_device(
+        device_registry, (DOMAIN, "hch5_pi_controller"), entry.entry_id
+    )
     coordinator.main_device_name = kept_device_name(
         existing_main.name if existing_main else None, main_device_name(mk2_info)
     )
