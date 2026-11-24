@@ -72,3 +72,21 @@ def test_temperature_age_is_sent_and_presence_is_not():
     assert 1195 <= rooms["Stue"]["temperature_age_s"] <= 1210
     assert "presence" not in rooms["Stue"]
     assert "Kontor" not in rooms
+
+
+def test_all_sensor_ages_are_sent_even_when_forwarded_values_are_unchanged():
+    from datetime import timedelta
+    from homeassistant.util import dt as dt_util
+    kinds=('temperature','humidity','co2','pm25')
+    values=('22','55','1200','35')
+    states={f'sensor.{kind}':SimpleNamespace(state=value,attributes={},last_reported=dt_util.utcnow()-timedelta(hours=4))
+            for kind,value in zip(kinds,values)}
+    fake=SimpleNamespace(room_sources=[{'name':'Stue',**{kind:f'sensor.{kind}' for kind in kinds}}],
+                         hass=SimpleNamespace(states=SimpleNamespace(get=states.get)))
+    payload=SmartPassiveLinkCoordinator._room_payload(fake)['Stue']
+    assert payload['measurement_age_version']==1
+    for kind in kinds:
+        assert 14399 <= payload[f'{kind}_age_s'] <= 14410
+    # A second forwarding operation does not replace the original report time.
+    again=SmartPassiveLinkCoordinator._room_payload(fake)['Stue']
+    assert again['co2_age_s']>=payload['co2_age_s']

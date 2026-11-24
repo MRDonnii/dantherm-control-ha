@@ -23,6 +23,7 @@ from .forecast_source import forecast_signals, resolve_entity
 from .coordinator import PassiveLinkCoordinator
 from .room_catalog import build_catalog, legacy_payload, sources_from_setup, tracked_entities
 from .weather_source import weather_payload
+from .sensor_age import reported_age_seconds
 
 _LOGGER = logging.getLogger(__name__)
 SIGNAL_VALID_FOR = 300
@@ -134,6 +135,7 @@ class SmartPassiveLinkCoordinator(PassiveLinkCoordinator):
                 continue
             values: dict[str, object] = {
                 "source": "home_assistant",
+                "measurement_age_version": 1,
                 "enabled": bool(source.get("enabled", True)),
                 "control": bool(source.get("control", True)),
                 "priority": str(source.get("priority") or "auto"),
@@ -157,15 +159,9 @@ class SmartPassiveLinkCoordinator(PassiveLinkCoordinator):
                     continue
                 values[kind] = value
                 entities[kind] = str(entity_id)
-                if kind == "temperature":
-                    # Lets the Pi skip a sensor that has stopped reporting.
-                    reported = getattr(state, "last_reported", None) or getattr(state, "last_updated", None)
-                    try:
-                        age = (dt_util.utcnow() - reported).total_seconds()
-                    except (TypeError, AttributeError):
-                        age = None
-                    if age is not None and age >= 0:
-                        values["temperature_age_s"] = round(age)
+                age = reported_age_seconds(state, dt_util.utcnow())
+                if age is not None:
+                    values[f"{kind}_age_s"] = age
             if entities:
                 values["entities"] = entities
                 rooms[name] = values

@@ -83,6 +83,8 @@ Values are leased to the Pi for five minutes and renewed every minute, so stale 
 
 Smart Auto supports up to 32 rooms, combines HCH5/HAC1's own CO₂/RH with HA sensors, uses the worst relevant measurement rather than an average, supports levels 1–6 and falls back to Local Auto when HA input is stale. `control: false` rooms remain visible for diagnostics but do not steer ventilation. A bypass request is available through the Pi API, while the actual damper position is a separate readback.
 
+From `0.9.0-beta.13`, each forwarded room temperature, humidity, CO₂ and PM2.5 measurement includes its age since the entity's last HA report (`last_reported`, falling back to `last_updated`). Repeated forwarding does not reset this age. Pi `1.13.0-rc.3` can reject individual values older than three hours and show their quality on the Rooms page; missing or invalid ages from this protocol version are excluded. Earlier Pi versions ignore the additional metadata and keep their existing behavior. Entity IDs, room assignments and controller settings are unchanged. Restart Home Assistant after installing the updated Python files.
+
 ## Why the telemetry connection is read-only
 
 Our observations of the HCH5 MK1 + HAC1 installation show an existing controller acting as the Modbus RTU master. It continuously sends requests, and the ventilation unit replies as a slave. Those request/response frames already contain the operating values needed by Home Assistant, so this integration can decode them without polling the unit itself.
