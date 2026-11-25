@@ -53,6 +53,7 @@ class ControllerApiClient:
         self.on_auth_failed: Callable[[], None] | None = None
         # Called when the Pi answers again after having been away (or on the first answer).
         self.on_connected: Callable[[], None] | None = None
+        self._ever_connected = False
 
     @property
     def is_fresh(self) -> bool:
@@ -63,11 +64,13 @@ class ControllerApiClient:
 
     def _mark_ok(self) -> None:
         was_connected = self.connected
+        first_ever = not self._ever_connected
+        self._ever_connected = True
         self.connected = True
         self.last_error = None
         self.last_ok = time.monotonic()
         self.auth_failed = False
-        if not was_connected and self.on_connected is not None:
+        if not was_connected and not first_ever and self.on_connected is not None:
             try:
                 self.on_connected()
             except Exception:  # noqa: BLE001 - a callback must never break the poll loop
@@ -92,7 +95,8 @@ class ControllerApiClient:
                 body = await response.json(content_type=None)
             except ValueError:
                 body = None
-            if response.status in (401, 403):
+            if response.status == 401 or (response.status == 403 and method == "GET" and path.endswith("/state")):
+                # A 403 on a command can be a scope or role refusal with a fine token.
                 self._note_auth_failure()
             if response.status >= 400:
                 message = body.get("error") if isinstance(body, dict) else None

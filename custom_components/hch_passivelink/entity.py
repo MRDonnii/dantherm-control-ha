@@ -181,6 +181,25 @@ ORPHAN_CHECK_INTERVAL_S = 3600
 ORPHAN_CLEANUP_KEYS = {"extract_rooms_temperature", "extract_duct_loss_k", "extract_duct_loss_percent"}
 
 
+def _duct_source_missing(coordinator) -> bool:
+    """True only when the Pi says no extract duct source is set, or its room is gone."""
+    state = getattr(coordinator, "controller_state", None) or {}
+    if "duct_extract_source" not in state:
+        return False  # old Pi: cannot tell, so never remove
+    source = str(state.get("duct_extract_source") or "").strip()
+    if not source:
+        return True
+    if source.startswith("room:"):
+        wanted = source[5:].strip().casefold()
+        try:
+            rooms = coordinator.active_room_sources()
+        except Exception:  # noqa: BLE001
+            return False
+        names = {str(r.get("name") or "").strip().casefold() for r in rooms}
+        return bool(names) and wanted not in names
+    return False
+
+
 @callback
 def _clean_up_orphans(entry, coordinator, pending: list) -> None:
     """Remove registry entries of deferred entities that have had no data for weeks.
@@ -201,6 +220,7 @@ def _clean_up_orphans(entry, coordinator, pending: list) -> None:
     if not (controller is not None and controller.connected and getattr(coordinator, "controller_state", None)):
         return
     memory.last_orphan_check = now
+    source_missing = _duct_source_missing(coordinator)
     if hass.is_running and now - memory.created_at > 600:
         memory.prune_missing(hass)
     registry = er.async_get(hass)
@@ -211,6 +231,10 @@ def _clean_up_orphans(entry, coordinator, pending: list) -> None:
         if getattr(entity, "key", None) not in ORPHAN_CLEANUP_KEYS:
             continue
         unique_id = entity.unique_id
+        if not source_missing:
+            # Empty values are normal (e.g. a warm summer): only a missing source is an orphan.
+            memory.clear_missing(unique_id)
+            continue
         since = memory.note_missing(unique_id, now)
         if now - since < ORPHAN_AFTER_S:
             continue

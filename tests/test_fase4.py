@@ -109,12 +109,12 @@ def test_controller_freshness_and_reconnect_callback():
     assert not api.is_fresh
     api._mark_ok()
     api._mark_ok()
-    assert api.is_fresh and seen == ["up"]  # only on the change from away to connected
+    assert api.is_fresh and seen == []  # the very first connect is covered by the startup push
     api.last_ok -= 1000
     assert not api.is_fresh
     api.connected = False
     api._mark_ok()
-    assert seen == ["up", "up"]
+    assert seen == ["up"]  # only on a change from away back to connected
 
 
 def test_rejected_token_starts_reauth_once():
@@ -261,7 +261,7 @@ def test_orphaned_duct_entities_are_removed_after_two_weeks(monkeypatch):
     memory = memory_mod.RuntimeMemory(hass, "e")
     memory._loaded = True
     coordinator = SimpleNamespace(
-        hass=hass, age_memory=memory, controller_state={"a": 1},
+        hass=hass, age_memory=memory, controller_state={"a": 1, "duct_extract_source": ""},
         controller_client=SimpleNamespace(connected=True),
     )
     pending = [SimpleNamespace(key="extract_duct_loss_k", unique_id="u_loss"),
@@ -288,3 +288,42 @@ def test_dew_point_is_sent_for_rooms_and_weather():
     assert values["dew_point_c"] == pytest.approx(-3.87, abs=0.05)
     weather = SimpleNamespace(state="cloudy", last_updated=now, attributes={"temperature": 1.0, "humidity": 80})
     assert "dew_point_c" in weather_payload("weather.dmi", weather)
+
+
+def test_duct_entities_stay_while_the_source_room_exists():
+    rooms = [{"name": "Udsugningsrum"}]
+    coord = SimpleNamespace(controller_state={"duct_extract_source": "room:udsugningsrum"},
+                            active_room_sources=lambda: rooms)
+    assert entity_mod._duct_source_missing(coord) is False
+    coord.controller_state = {"duct_extract_source": "room:Slettet"}
+    assert entity_mod._duct_source_missing(coord) is True
+    coord.controller_state = {"duct_extract_source": ""}
+    assert entity_mod._duct_source_missing(coord) is True
+    coord.controller_state = {}
+    assert entity_mod._duct_source_missing(coord) is False
+
+
+def test_command_403_does_not_start_reauth():
+    class Response:
+        status = 403
+
+        async def json(self, content_type=None):
+            return {"error": "Nøglen har ikke rettigheden"}
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+    api = _api()
+    api.session = SimpleNamespace(request=lambda *a, **k: Response())
+    fired = []
+    api.on_auth_failed = lambda: fired.append(1)
+    import asyncio
+    with pytest.raises(Exception):
+        asyncio.run(api._json("POST", "/api/controller/command", {}))
+    assert fired == [] and not api.auth_failed
+    with pytest.raises(Exception):
+        asyncio.run(api._json("GET", "/api/controller/state"))
+    assert fired == [1]
