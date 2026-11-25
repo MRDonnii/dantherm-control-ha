@@ -3,12 +3,15 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from datetime import timedelta
 
 from homeassistant.util import dt as dt_util
 
 from homeassistant.components import persistent_notification
 from homeassistant.core import Event, callback
+from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.event import async_track_state_change_event, async_track_time_interval
 
 from .const import (
@@ -16,13 +19,20 @@ from .const import (
     CONF_TODAY_HIGH_ENTITY,
     DEFAULT_FORECAST_HIGH_ENTITY,
     DEFAULT_TODAY_HIGH_ENTITY,
+    DOMAIN,
     ROOM_SENSOR_KEYS,
     ROOM_SENSOR_RANGES,
 )
 from .forecast_source import forecast_signals, resolve_entity
-from .coordinator import PassiveLinkCoordinator
+from .coordinator import (
+    HEALTH_ISSUE_DELAY,
+    ISSUE_CONTROLLER_TOKEN,
+    ISSUE_CONTROLLER_UNREACHABLE,
+    PassiveLinkCoordinator,
+)
 from .room_catalog import build_catalog, legacy_payload, sources_from_setup, tracked_entities
-from .weather_source import weather_payload
+from .weather_source import dew_point_c, weather_payload
+from .runtime_memory import RuntimeMemory
 from .sensor_age import reported_age_seconds
 
 _LOGGER = logging.getLogger(__name__)
@@ -41,21 +51,57 @@ ROOM_SENSOR_LABELS = {
 }
 
 
-def room_readings(hass, source: dict[str, object]) -> tuple[dict[str, object], dict[str, str], dict[str, str]]:
+_NO_DATA = {"unknown", "unavailable", "none", ""}
+
+
+def _state_age(hass, entity_id: str, state, now, memory) -> int | None:
+    if memory is not None:
+        return memory.age_seconds(entity_id, state, now)
+    return reported_age_seconds(state, now)
+
+
+def device_seen_age(hass, entity_id: str, now, memory) -> int | None:
+    """Seconds since the device behind a sensor last reported anything at all.
+
+    A sensor that reports only on change (PM2.5) keeps an old value while the
+    device is fine; its sibling entities (CO2, temperature) show that it is alive.
+    """
+    registry = er.async_get(hass)
+    entry = registry.async_get(entity_id)
+    if entry is None or not entry.device_id:
+        return None
+    best: int | None = None
+    for other in er.async_entries_for_device(registry, entry.device_id):
+        state = hass.states.get(other.entity_id)
+        if state is None or state.state in _NO_DATA:
+            continue
+        age = _state_age(hass, other.entity_id, state, now, memory)
+        if age is not None and (best is None or age < best):
+            best = age
+    return best
+
+
+def room_readings(
+    hass, source: dict[str, object], *, memory: RuntimeMemory | None = None, device_seen: bool = False,
+) -> tuple[dict[str, object], dict[str, str], dict[str, str]]:
     """Valid values (with ages), their entities, and selected sensors without a valid value.
 
     A sensor counts as missing only when one is selected for the kind and it is
     gone from the state machine, unavailable/unknown, non-numeric or out of range.
+    ``memory`` keeps real report times across Home Assistant restarts;
+    ``device_seen`` adds how recently the whole device was heard from.
     """
     values: dict[str, object] = {}
     entities: dict[str, str] = {}
     missing: dict[str, str] = {}
+    now = dt_util.utcnow()
+    device_ages: list[int] = []
     for kind, (minimum, maximum) in ROOM_SENSOR_RANGES.items():
         entity_id = source.get(kind)
         if not entity_id:
             continue
         state = hass.states.get(entity_id)
-        if state is None or state.state in {"unknown", "unavailable", "none", ""}:
+        if state is None or state.state in _NO_DATA:
             missing[kind] = str(entity_id)
             continue
         try:
@@ -69,9 +115,22 @@ def room_readings(hass, source: dict[str, object]) -> tuple[dict[str, object], d
             continue
         values[kind] = value
         entities[kind] = str(entity_id)
-        age = reported_age_seconds(state, dt_util.utcnow())
+        age = _state_age(hass, str(entity_id), state, now, memory)
         if age is not None:
             values[f"{kind}_age_s"] = age
+        if device_seen:
+            seen = device_seen_age(hass, str(entity_id), now, memory)
+            if seen is not None:
+                device_ages.append(seen)
+                values[f"{kind}_device_seen_age_s"] = seen
+    if device_ages:
+        # The worst device in the room, so one dead device never hides behind a live one.
+        values["device_seen_age_s"] = max(device_ages)
+    temperature, humidity = values.get("temperature"), values.get("humidity")
+    if isinstance(temperature, float) and isinstance(humidity, float):
+        dew = dew_point_c(temperature, humidity)
+        if dew is not None:
+            values["dew_point_c"] = dew
     return values, entities, missing
 
 
@@ -93,8 +152,15 @@ class SmartPassiveLinkCoordinator(PassiveLinkCoordinator):
                  weather_entity: str | None = None,
                  climate_entities: dict[str, str] | None = None,
                  rooms_enabled: bool | None = None,
+                 device_seen_enabled: bool = False,
                  **kwargs) -> None:
         super().__init__(*args, **kwargs)
+        # Real report times of the room sensors survive a Home Assistant restart.
+        self.age_memory = RuntimeMemory(self.hass, self.entry_id)
+        # Optional (off by default): tell the Pi how recently each sensor's device was heard from.
+        self.device_seen_enabled = bool(device_seen_enabled)
+        self._controller_lost_since: float | None = None
+        self._reconnect_task: asyncio.Task | None = None
         self.controller_client = controller_client
         self.controller_state: dict[str, object] = {}
         self.controller_task = None
@@ -168,6 +234,52 @@ class SmartPassiveLinkCoordinator(PassiveLinkCoordinator):
             persistent_notification.async_dismiss(self.hass, f"hch5_diagnostics_{code}")
         self._alarm_codes = set(active)
 
+    @callback
+    def _handle_controller_connected(self) -> None:
+        """The Pi answers again: send rooms and catalogue at once instead of waiting for the timers."""
+        if not self.rooms_enabled or self.controller_client is None:
+            return
+        if self._room_cycle_task is not None and not self._room_cycle_task.done():
+            return
+        if self._reconnect_task is not None and not self._reconnect_task.done():
+            return
+        self._reconnect_task = self.hass.async_create_background_task(
+            self._async_room_cycle(catalog=True), "Dantherm HCH Pi reconnect room push"
+        )
+
+    def _update_health_issues(self) -> None:
+        super()._update_health_issues()
+        self._update_controller_health()
+
+    def _update_controller_health(self) -> None:
+        """Repair issue when the Pi controller API stays away; also unfreezes a stuck poll loop."""
+        client = self.controller_client
+        if client is None:
+            return
+        now = time.monotonic()
+        if client.connected and not client.is_fresh:
+            # The poll loop is stuck or dead: do not show old values as live.
+            client.connected = False
+            client.last_error = "No answer from the controller"
+            self.async_update_listeners()
+        if client.connected:
+            self._controller_lost_since = None
+            ir.async_delete_issue(self.hass, DOMAIN, ISSUE_CONTROLLER_UNREACHABLE)
+            ir.async_delete_issue(self.hass, DOMAIN, ISSUE_CONTROLLER_TOKEN)
+            return
+        self._controller_lost_since = self._controller_lost_since or now
+        if now - self._controller_lost_since <= HEALTH_ISSUE_DELAY:
+            return
+        rejected = bool(client.auth_failed)
+        ir.async_delete_issue(
+            self.hass, DOMAIN, ISSUE_CONTROLLER_UNREACHABLE if rejected else ISSUE_CONTROLLER_TOKEN
+        )
+        ir.async_create_issue(
+            self.hass, DOMAIN, ISSUE_CONTROLLER_TOKEN if rejected else ISSUE_CONTROLLER_UNREACHABLE,
+            is_fixable=False, severity=ir.IssueSeverity.WARNING,
+            translation_key=ISSUE_CONTROLLER_TOKEN if rejected else ISSUE_CONTROLLER_UNREACHABLE,
+        )
+
     async def async_controller_command(self, patch: dict[str, object]) -> dict[str, object]:
         if self.controller_client is None:
             raise ConnectionError("Controller API is not configured")
@@ -192,7 +304,10 @@ class SmartPassiveLinkCoordinator(PassiveLinkCoordinator):
                 "priority": str(source.get("priority") or "auto"),
                 "room_type": str(source.get("room_type") or "auto"),
             }
-            readings, entities, missing = room_readings(self.hass, source)
+            readings, entities, missing = room_readings(
+                self.hass, source, memory=getattr(self, "age_memory", None),
+                device_seen=bool(getattr(self, "device_seen_enabled", False)),
+            )
             values.update(readings)
             # A room without one valid value stays out: an older Pi rejects the
             # whole message for a room it does not know with no measurements.
@@ -218,7 +333,9 @@ class SmartPassiveLinkCoordinator(PassiveLinkCoordinator):
             name = str(source.get("name") or "").strip()
             if not name:
                 continue
-            _readings, _entities, missing = room_readings(self.hass, source)
+            _readings, _entities, missing = room_readings(
+                self.hass, source, memory=getattr(self, "age_memory", None)
+            )
             if missing:
                 result[name] = missing
         return result
@@ -467,7 +584,9 @@ class SmartPassiveLinkCoordinator(PassiveLinkCoordinator):
     async def async_start_controller(self) -> None:
         if self.controller_client is None:
             return
+        await self.age_memory.async_load()
         self.controller_client._update = self.async_handle_controller_update
+        self.controller_client.on_connected = self._handle_controller_connected
         self.controller_task = self.hass.async_create_background_task(
             self.controller_client.run(), "Dantherm HCH Pi controller API"
         )
@@ -543,6 +662,15 @@ class SmartPassiveLinkCoordinator(PassiveLinkCoordinator):
             except Exception as error:  # noqa: BLE001 - never block shutdown
                 _LOGGER.debug("Room catalogue task ended with error during shutdown: %s", error)
         self._room_cycle_task = None
+        if self._reconnect_task is not None and not self._reconnect_task.done():
+            self._reconnect_task.cancel()
+            try:
+                await self._reconnect_task
+            except asyncio.CancelledError:
+                pass
+            except Exception as error:  # noqa: BLE001 - never block shutdown
+                _LOGGER.debug("Reconnect push task ended with error during shutdown: %s", error)
+        self._reconnect_task = None
         if self._room_send_task is not None:
             self._room_send_task.cancel()
             try:
@@ -561,4 +689,5 @@ class SmartPassiveLinkCoordinator(PassiveLinkCoordinator):
             except asyncio.CancelledError:
                 pass
             self.controller_task = None
+        await self.age_memory.async_save()
         await super().async_shutdown()

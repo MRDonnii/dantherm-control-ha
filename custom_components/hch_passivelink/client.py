@@ -67,16 +67,29 @@ class PassiveLinkClient:
                     if not chunk:
                         raise ConnectionError("TCP stream closed")
                     self.parser.feed(chunk)
+            except asyncio.CancelledError:
+                raise
             except (OSError, ConnectionError) as err:
                 self.connected = False
                 self._update(dict(self.decoder.data))
                 _LOGGER.debug("PassiveLink reconnect: %s", err)
                 await asyncio.sleep(delay)
                 delay = min(delay * 2, 30)
+            except Exception as err:  # noqa: BLE001 - the stream task must never end
+                self.connected = False
+                self._update(dict(self.decoder.data))
+                _LOGGER.warning("PassiveLink stream error, reconnecting: %s", err)
+                await asyncio.sleep(delay)
+                delay = min(delay * 2, 30)
             finally:
                 if writer is not None:
                     writer.close()
-                    await writer.wait_closed()
+                    try:
+                        await writer.wait_closed()
+                    except (OSError, ConnectionError):
+                        # After a connection reset wait_closed() raises again;
+                        # that must not end the reconnect loop.
+                        pass
 
     async def stop(self) -> None:
         self._stopped = True
@@ -156,10 +169,15 @@ class PassiveSerialClient:
         while not self._stopped:
             try:
                 await asyncio.to_thread(self._read_blocking)
-            except (OSError, serial.SerialException) as err:
+            except asyncio.CancelledError:
+                raise
+            except Exception as err:  # noqa: BLE001 - OSError/SerialException and anything unexpected
                 self.connected = False
                 self._update(dict(self.decoder.data))
-                _LOGGER.debug("PassiveLink serial reconnect: %s", err)
+                if isinstance(err, (OSError, serial.SerialException)):
+                    _LOGGER.debug("PassiveLink serial reconnect: %s", err)
+                else:
+                    _LOGGER.warning("PassiveLink serial error, reconnecting: %s", err)
                 await asyncio.sleep(delay)
                 delay = min(delay * 2, 30)
             else:
@@ -204,10 +222,15 @@ class Mk2Client:
                 data = await asyncio.to_thread(self.unit.snapshot)
                 self.connected, delay = True, self.POLL_SECONDS
                 self.data = {**data, "bus_traffic": True}
-            except (OSError, ValueError) as err:
+            except asyncio.CancelledError:
+                raise
+            except Exception as err:  # noqa: BLE001 - one bad poll must not end the loop
                 self.connected = False
                 self.data = {**self.data, "bus_traffic": False}
-                _LOGGER.debug("MKII poll failed: %s", err)
+                if isinstance(err, (OSError, ValueError)):
+                    _LOGGER.debug("MKII poll failed: %s", err)
+                else:
+                    _LOGGER.warning("MKII poll error: %s", err)
                 delay = min(delay * 2, 60)
             self._update(dict(self.data))
             try:

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from collections.abc import Callable
 
 from aiohttp import ClientError, ClientSession
@@ -44,6 +45,33 @@ class ControllerApiClient:
         self.connected = False
         self._stopped = False
         self.last_error: str | None = None
+        # Monotonic time of the last answer from the Pi (any successful request).
+        self.last_ok: float | None = None
+        # True while the Pi rejects the token (HTTP 401/403).
+        self.auth_failed = False
+        # Called once when the Pi rejects the token (starts a reauth flow).
+        self.on_auth_failed: Callable[[], None] | None = None
+        # Called when the Pi answers again after having been away (or on the first answer).
+        self.on_connected: Callable[[], None] | None = None
+
+    @property
+    def is_fresh(self) -> bool:
+        """Connected and answered recently (a stuck poll loop must not look healthy)."""
+        if not self.connected or self.last_ok is None:
+            return False
+        return time.monotonic() - self.last_ok <= max(30.0, 4 * self.poll_seconds)
+
+    def _mark_ok(self) -> None:
+        was_connected = self.connected
+        self.connected = True
+        self.last_error = None
+        self.last_ok = time.monotonic()
+        self.auth_failed = False
+        if not was_connected and self.on_connected is not None:
+            try:
+                self.on_connected()
+            except Exception:  # noqa: BLE001 - a callback must never break the poll loop
+                _LOGGER.exception("Controller reconnect callback failed")
 
     @property
     def headers(self) -> dict[str, str]:
@@ -64,6 +92,8 @@ class ControllerApiClient:
                 body = await response.json(content_type=None)
             except ValueError:
                 body = None
+            if response.status in (401, 403):
+                self._note_auth_failure()
             if response.status >= 400:
                 message = body.get("error") if isinstance(body, dict) else None
                 if isinstance(message, str) and message.strip() and 400 <= response.status < 500:
@@ -73,10 +103,18 @@ class ControllerApiClient:
                 raise ConnectionError("Controller returned invalid JSON")
             return body
 
+    def _note_auth_failure(self) -> None:
+        first = not self.auth_failed
+        self.auth_failed = True
+        if first and self.on_auth_failed is not None:
+            try:
+                self.on_auth_failed()
+            except Exception:  # noqa: BLE001
+                _LOGGER.exception("Controller reauth callback failed")
+
     async def async_get_state(self) -> dict[str, object]:
         state = await self._json("GET", "/api/controller/state")
-        self.connected = True
-        self.last_error = None
+        self._mark_ok()
         self._update(state)
         return state
 
@@ -84,8 +122,7 @@ class ControllerApiClient:
         if "enabled" in patch:
             raise ValueError("Pi controller cannot be disabled")
         state = await self._json("POST", "/api/controller/command", patch)
-        self.connected = True
-        self.last_error = None
+        self._mark_ok()
         self._update(state)
         return state
 
@@ -95,8 +132,7 @@ class ControllerApiClient:
             "/api/controller/inputs",
             {"source": "home_assistant", "valid_for_s": int(valid_for_s), "rooms": rooms},
         )
-        self.connected = True
-        self.last_error = None
+        self._mark_ok()
         self._update(state)
         return state
 
@@ -124,8 +160,7 @@ class ControllerApiClient:
             "/api/controller/signals",
             {**signals, "valid_for_s": int(valid_for_s)},
         )
-        self.connected = True
-        self.last_error = None
+        self._mark_ok()
         self._update(state)
         return state
 
@@ -139,10 +174,18 @@ class ControllerApiClient:
                 await self.async_get_state()
                 delay = 1.0
                 await asyncio.sleep(self.poll_seconds)
+            except asyncio.CancelledError:
+                raise
             except (OSError, ClientError, ConnectionError, asyncio.TimeoutError) as error:
                 self.connected = False
                 self.last_error = str(error)
                 _LOGGER.debug("Controller API reconnect: %s", error)
+                await asyncio.sleep(delay)
+                delay = min(delay * 2, 30.0)
+            except Exception as error:  # noqa: BLE001 - the poll loop must never end
+                self.connected = False
+                self.last_error = str(error)
+                _LOGGER.warning("Controller API error, retrying: %r", error)
                 await asyncio.sleep(delay)
                 delay = min(delay * 2, 30.0)
 

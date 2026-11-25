@@ -1,5 +1,7 @@
 """Dantherm Control integration (formerly Dantherm HCH5 Control)."""
 
+import logging
+
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
@@ -29,6 +31,8 @@ from .const import (
     CONF_CONTROLLER_PORT,
     CONF_CONTROLLER_TOKEN,
     CONF_SMART_ROOMS_ENABLED,
+    CONF_DEVICE_SEEN_AGE,
+    entry_unique_id,
     CONF_SMART_INPUT_VALID_FOR,
     CONF_UNIT_POWER_ENTITY,
     CONF_UNIT_ENERGY_TODAY_ENTITY,
@@ -63,8 +67,15 @@ from .const import (
     renamed_entry_title,
 )
 from .auxiliary import AuxiliaryTemperatureClient
-from .coordinator import ISSUE_CONNECTION_LOST, ISSUE_HAC1_DISCONNECTED
+from .coordinator import (
+    ISSUE_CONNECTION_LOST,
+    ISSUE_CONTROLLER_TOKEN,
+    ISSUE_CONTROLLER_UNREACHABLE,
+    ISSUE_HAC1_DISCONNECTED,
+)
 from .smart_coordinator import SmartPassiveLinkCoordinator
+
+_LOGGER = logging.getLogger(__name__)
 
 PLATFORMS = [
     Platform.SENSOR,
@@ -144,8 +155,24 @@ async def _async_reload_entry(hass: HomeAssistant, entry: PassiveLinkConfigEntry
     await hass.config_entries.async_reload(entry.entry_id)
 
 
+def _sync_entry_unique_id(hass: HomeAssistant, entry: PassiveLinkConfigEntry, config: dict) -> None:
+    """Keep the entry's unique_id in step with its address (it was set only when created).
+
+    Entity and device ids do not depend on it, so nothing else changes.
+    """
+    wanted = entry_unique_id(config)
+    if not wanted or entry.unique_id == wanted:
+        return
+    if any(other.unique_id == wanted for other in hass.config_entries.async_entries(DOMAIN)
+           if other.entry_id != entry.entry_id):
+        _LOGGER.warning("Another Dantherm Control entry already uses %s; the unique id is left as it was", wanted)
+        return
+    hass.config_entries.async_update_entry(entry, unique_id=wanted)
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: PassiveLinkConfigEntry) -> bool:
     config = {**entry.data, **entry.options}
+    _sync_entry_unique_id(hass, entry, config)
     connection_type = config.get(CONF_CONNECTION_TYPE, CONNECTION_TCP)
     mk2_info = None
     if connection_type == CONNECTION_SERIAL:
@@ -208,6 +235,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: PassiveLinkConfigEntry) 
         controller_client=controller_client,
         room_sources=_room_sources(config),
         rooms_enabled=bool(config.get(CONF_SMART_ROOMS_ENABLED, False)),
+        device_seen_enabled=bool(config.get(CONF_DEVICE_SEEN_AGE, False)),
         smart_input_valid_for=config.get(
             CONF_SMART_INPUT_VALID_FOR, DEFAULT_SMART_INPUT_VALID_FOR
         ),
@@ -220,7 +248,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: PassiveLinkConfigEntry) 
             "heat_price_dkk_kwh": config.get(CONF_HEAT_PRICE_ENTITY) or None,
         },
     )
+    if controller_client is not None:
+        # A rejected token (HTTP 401/403) asks the owner for a new one.
+        controller_client.on_auth_failed = lambda: entry.async_start_reauth(hass)
     await coordinator.async_load_filter_state()
+    coordinator.async_start_health_timer()
     client.set_update_callback(coordinator.async_handle_update)
     # Register the main device first so sub-devices can link to its id.
     coordinator.mk2_info = mk2_info
@@ -270,4 +302,6 @@ async def async_unload_entry(hass: HomeAssistant, entry: PassiveLinkConfigEntry)
         entry.runtime_data.task.cancel()
     ir.async_delete_issue(hass, DOMAIN, ISSUE_CONNECTION_LOST)
     ir.async_delete_issue(hass, DOMAIN, ISSUE_HAC1_DISCONNECTED)
+    ir.async_delete_issue(hass, DOMAIN, ISSUE_CONTROLLER_UNREACHABLE)
+    ir.async_delete_issue(hass, DOMAIN, ISSUE_CONTROLLER_TOKEN)
     return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)

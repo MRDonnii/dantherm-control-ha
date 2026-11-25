@@ -36,6 +36,7 @@ CONF_CONTROLLER_PORT = "controller_port"
 CONF_CONTROLLER_TOKEN = "controller_token"
 DEFAULT_CONTROLLER_PORT = 8080
 CONF_SMART_ROOMS_ENABLED = "smart_rooms_enabled"
+CONF_DEVICE_SEEN_AGE = "device_seen_age"
 CONF_SMART_INPUT_VALID_FOR = "smart_input_valid_for"
 CONF_SMART_ROOMS = "smart_rooms"
 # Power meter on the unit (e.g. a Shelly), sent to the Pi for its WebUI.
@@ -157,3 +158,17 @@ PI_DIAGNOSTIC_KEYS = (
     "pi_soft_temp_limit_now",
     "pi_soft_temp_limit_occurred",
 )
+
+
+def entry_unique_id(config: dict) -> str | None:
+    """The config entry's unique_id for its current connection settings."""
+    connection_type = config.get(CONF_CONNECTION_TYPE, CONNECTION_TCP)
+    if connection_type == CONNECTION_SERIAL:
+        port = config.get(CONF_SERIAL_PORT)
+        return f"serial:{port}" if port else None
+    host, port = str(config.get(CONF_HOST) or "").strip(), config.get(CONF_PORT)
+    if not host or port in (None, ""):
+        return None
+    if connection_type == CONNECTION_MK2:
+        return f"mk2:{host}:{int(port)}:{int(config.get(CONF_UNIT_ID, 1))}"
+    return f"{host}:{int(port)}"

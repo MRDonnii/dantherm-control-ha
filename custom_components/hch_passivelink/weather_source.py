@@ -22,6 +22,16 @@ def _number(value: object, minimum: float, maximum: float) -> float | None:
     return round(number, 2) if math.isfinite(number) and minimum <= number <= maximum else None
 
 
+def dew_point_c(temperature_c: float, humidity_pct: float) -> float | None:
+    """Dew point (Magnus formula, over water). The Pi uses it to move a humidity
+    reading to another temperature, e.g. outdoor humidity to the unit's T1."""
+    if not 0 < humidity_pct <= 100 or not -60 <= temperature_c <= 60:
+        return None
+    a, b = 17.62, 243.12
+    gamma = math.log(humidity_pct / 100) + a * temperature_c / (b + temperature_c)
+    return round(b * gamma / (a - gamma), 2)
+
+
 def weather_payload(entity_id: str, state: object, *, now: datetime | None = None) -> dict[str, object] | None:
     """Return current weather, omitting stale/unavailable observations."""
     if not entity_id.startswith("weather.") or state is None:
@@ -50,4 +60,10 @@ def weather_payload(entity_id: str, state: object, *, now: datetime | None = Non
     ):
         if value is not None:
             result[key] = value
+    if "dew_point_c" not in result and "temperature_c" in result and "humidity_pct" in result:
+        # Outdoor humidity must be moved to the unit's T1 via the dew point,
+        # so a weather entity without one gets it worked out here.
+        dew = dew_point_c(result["temperature_c"], result["humidity_pct"])
+        if dew is not None:
+            result["dew_point_c"] = dew
     return result

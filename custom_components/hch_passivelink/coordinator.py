@@ -7,7 +7,7 @@ from typing import Any
 from datetime import datetime, timedelta, timezone
 
 from homeassistant.components import persistent_notification
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import issue_registry as ir
@@ -39,6 +39,9 @@ EFFICIENCY_DROP_WARNING = 7.5
 EFFICIENCY_DROP_DEGRADED = 12.5
 ISSUE_CONNECTION_LOST = "connection_lost"
 ISSUE_HAC1_DISCONNECTED = "hac1_disconnected"
+ISSUE_CONTROLLER_UNREACHABLE = "controller_unreachable"
+ISSUE_CONTROLLER_TOKEN = "controller_token_rejected"
+HEALTH_CHECK_INTERVAL = timedelta(seconds=60)
 _LOGGER = logging.getLogger(__name__)
 
 class PassiveLinkCoordinator(DataUpdateCoordinator[dict[str, object]]):
@@ -55,6 +58,8 @@ class PassiveLinkCoordinator(DataUpdateCoordinator[dict[str, object]]):
     ) -> None:
         super().__init__(hass, logger=__import__("logging").getLogger(__name__), name=DEFAULT_NAME)
         self.data = {}
+        self.entry_id = entry_id
+        self._remove_health_timer = None
         self.client = client
         self.mk2_info = None
         self.task = None
@@ -114,6 +119,17 @@ class PassiveLinkCoordinator(DataUpdateCoordinator[dict[str, object]]):
             self.hass, self._async_update_filter_clock, timedelta(hours=1)
         )
         self._schedule_notification_check()
+    def async_start_health_timer(self) -> None:
+        """Check connection health every minute; updates stop when a connection is down."""
+        if self._remove_health_timer is None:
+            self._remove_health_timer = async_track_time_interval(
+                self.hass, self._async_health_tick, HEALTH_CHECK_INTERVAL
+            )
+
+    @callback
+    def _async_health_tick(self, _now=None) -> None:
+        self._update_health_issues()
+
     async def _async_update_auxiliary(self, sample) -> None:
         """Fetch water temperatures and Pi diagnostics, then publish together.
 
@@ -502,6 +518,9 @@ class PassiveLinkCoordinator(DataUpdateCoordinator[dict[str, object]]):
         if self._remove_filter_timer is not None:
             self._remove_filter_timer()
             self._remove_filter_timer = None
+        if self._remove_health_timer is not None:
+            self._remove_health_timer()
+            self._remove_health_timer = None
         if self._remove_auxiliary_timer is not None:
             self._remove_auxiliary_timer()
             self._remove_auxiliary_timer = None

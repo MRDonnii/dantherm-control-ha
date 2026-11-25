@@ -12,7 +12,7 @@ from homeassistant.helpers import selector
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .client import Mk2Client, PassiveLinkClient, PassiveSerialClient
-from .controller_api import ControllerApiClient
+from .controller_api import ControllerApiClient, ControllerRejectedError
 from .sensor_support import (
     KIND_CO2,
     KIND_ENERGY,
@@ -43,6 +43,8 @@ from .const import (
     CONF_CONTROLLER_PORT,
     CONF_CONTROLLER_TOKEN,
     CONF_SMART_ROOMS_ENABLED,
+    CONF_DEVICE_SEEN_AGE,
+    entry_unique_id,
     CONF_SMART_INPUT_VALID_FOR,
     CONF_UNIT_POWER_ENTITY,
     CONF_UNIT_ENERGY_TODAY_ENTITY,
@@ -190,6 +192,44 @@ class PassiveLinkConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             errors=errors,
         )
 
+    async def async_step_reauth(self, entry_data: dict) -> FlowResult:
+        """The Pi rejected the controller token: ask for a new one."""
+        return await self.async_step_reauth_confirm()
+
+    async def async_step_reauth_confirm(self, user_input: dict | None = None) -> FlowResult:
+        entry = self._get_reauth_entry()
+        current = {**entry.data, **entry.options}
+        errors = {}
+        host = str(current.get(CONF_CONTROLLER_HOST) or current.get(CONF_HOST) or "").strip()
+        port = int(current.get(CONF_CONTROLLER_PORT, DEFAULT_CONTROLLER_PORT))
+        if user_input is not None:
+            token = str(user_input[CONF_CONTROLLER_TOKEN]).strip()
+            client = ControllerApiClient(
+                async_get_clientsession(self.hass), host, port, token, lambda _: None
+            )
+            try:
+                await client.async_probe()
+            except ControllerRejectedError:
+                errors["base"] = "invalid_auth"
+            except (OSError, ConnectionError, asyncio.TimeoutError):
+                errors["base"] = "controller_cannot_connect"
+            else:
+                return self.async_update_reload_and_abort(
+                    entry,
+                    options={**entry.options, CONF_CONTROLLER_TOKEN: token},
+                    reload_even_if_entry_is_unchanged=True,
+                )
+        return self.async_show_form(
+            step_id="reauth_confirm",
+            data_schema=vol.Schema({
+                vol.Required(CONF_CONTROLLER_TOKEN): selector.TextSelector(
+                    selector.TextSelectorConfig(type=selector.TextSelectorType.PASSWORD)
+                ),
+            }),
+            description_placeholders={"controller": f"{host}:{port}"},
+            errors=errors,
+        )
+
     @staticmethod
     def async_get_options_flow(config_entry):
         return PassiveLinkOptionsFlow(config_entry)
@@ -316,6 +356,14 @@ class PassiveLinkOptionsFlow(config_entries.OptionsFlow):
                     if connection_type == CONNECTION_MK2:
                         options[CONF_UNIT_ID] = int(current.get(CONF_UNIT_ID, 1))
             if not errors:
+                wanted = entry_unique_id({**current, **options})
+                if wanted and any(
+                    other.unique_id == wanted
+                    for other in self.hass.config_entries.async_entries(DOMAIN)
+                    if other.entry_id != self._config_entry.entry_id
+                ):
+                    errors["base"] = "already_configured"
+            if not errors:
                 self._pending = options
                 # Chosen on the separate sensor page; keep them unless changed there.
                 for key in ENERGY_SIGNAL_ENTITIES:
@@ -425,6 +473,10 @@ class PassiveLinkOptionsFlow(config_entries.OptionsFlow):
             ): selector.NumberSelector(selector.NumberSelectorConfig(
                 min=30, max=900, step=30, mode=selector.NumberSelectorMode.BOX
             )),
+            vol.Required(
+                CONF_DEVICE_SEEN_AGE,
+                default=current.get(CONF_DEVICE_SEEN_AGE, False),
+            ): bool,
         })
         return self.async_show_form(step_id="controller", data_schema=schema, errors=errors)
 

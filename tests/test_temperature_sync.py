@@ -104,7 +104,7 @@ def coordinator_class():
     ns = dict(asyncio=asyncio, logging=logging, time=time, datetime=datetime.datetime,
               timedelta=datetime.timedelta, timezone=datetime.timezone,
               TEMPERATURE_KEYS=TEMPERATURE_KEYS, DataUpdateCoordinator=Base,
-              HomeAssistant=object, derive_alarm_values=derive_alarm_values,
+              HomeAssistant=object, callback=lambda func: func, derive_alarm_values=derive_alarm_values,
               PI_DIAGNOSTIC_KEYS=PI_DIAGNOSTIC_KEYS)
     exec(compile(ast.Module(body=nodes, type_ignores=[]), "coordinator.py", "exec"), ns)
     return ns["PassiveLinkCoordinator"]

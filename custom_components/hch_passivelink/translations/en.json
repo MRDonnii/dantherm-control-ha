@@ -5,10 +5,11 @@
       "user": {"title": "Choose the connection", "description": "An HCH5 MK1 with HAC1 is read passively through a transparent RS485-over-TCP adapter or a USB-RS485 adapter connected directly to the Home Assistant host; both modes are read-only. A Dantherm unit with the Dantherm Residential Modbus map (HCH5 MKII, RCV, HCV, HCC) is read and controlled over Modbus TCP.", "data": {"connection_type": "Connection type"}},
       "tcp": {"title": "Connect using RS485 over TCP", "description": "Enter the address of the adapter's raw TCP stream. The integration never sends requests or commands.", "data": {"host": "Host or IP address", "port": "TCP port"}},
       "mk2": {"title": "Dantherm unit over Modbus TCP", "description": "Connect directly to a Dantherm unit with the Dantherm Residential Modbus map – HCH5 MKII, RCV, HCV or HCC – over Modbus TCP. You get readings and control of operation mode, fan step, bypass, filter and alarms – no Raspberry Pi needed.", "data": {"host": "IP address", "port": "Port", "unit_id": "Modbus address"}},
+      "reauth_confirm": {"title": "Enter a new controller token", "description": "The Raspberry Pi controller at {controller} does not accept the saved token. Enter the controller token again (it is shown in the Dantherm WebUI).", "data": {"controller_token": "Controller API token"}},
       "serial": {"title": "Connect using USB-RS485", "description": "Enter the stable device path, preferably /dev/serial/by-id/.... The port is opened read-only at 19200 8E1 and the integration never calls write().", "data": {"serial_port": "Serial device path"}}
     },
-    "error": {"cannot_connect": "Connected, but no valid Dantherm RTU traffic was received."},
-    "abort": {"already_configured": "This gateway is already configured."}
+    "error": {"invalid_auth": "The controller does not accept this token.", "controller_cannot_connect": "The controller API could not be reached.", "cannot_connect": "Connected, but no valid Dantherm RTU traffic was received."},
+    "abort": {"reauth_successful": "The new token works. The integration is reloading.", "already_configured": "This gateway is already configured."}
   },
   "entity": {
     "select": {"mk2_operation": {"name": "Operation mode", "state": {"standby": "Standby", "manual": "Manual", "automatic": "Automatic", "week_program": "Week program", "away": "Away", "summer": "Summer", "fireplace": "Fireplace"}}, "mk2_fan_level": {"name": "Fan step"}, "afterheat_control_mode": {"name": "Afterheat regulation", "state": {"pi": "Pi", "native": "HAC1"}}},
@@ -135,7 +136,8 @@
           "controller_port": "Controller API port",
           "controller_token": "Controller API token",
           "smart_rooms_enabled": "Use Home Assistant sensors in Smart Auto",
-          "smart_input_valid_for": "Sensor input valid for (seconds)"
+          "smart_input_valid_for": "Sensor input valid for (seconds)",
+          "device_seen_age": "Treat a sensor as alive when its device reports other values (off by default)"
         }
       },
       "controller_sensors": {
@@ -195,12 +197,15 @@
       }
     },
     "error": {
+      "already_configured": "Another Dantherm Control entry already uses this address.",
       "cannot_connect": "The connection could not be validated, or no valid Dantherm traffic was received.",
       "controller_cannot_connect": "The controller API could not be reached or the token could not be authenticated.",
       "required": "This field is required for the selected connection type."
     }
   },
   "issues": {
+    "controller_unreachable": {"title": "No connection to the Raspberry Pi controller", "description": "Home Assistant has not been able to reach the Dantherm Control controller on the Raspberry Pi for more than 15 minutes. Ventilation keeps running on the Pi, but Home Assistant cannot control it or send room sensors. Check the Pi's power and network, and that the address and port are right in the integration's options."},
+    "controller_token_rejected": {"title": "The controller does not accept the saved token", "description": "The Raspberry Pi controller refuses the token saved in the integration. Open the notification about the integration under Settings and enter the token again. It is shown in the Dantherm WebUI."},
     "connection_lost": {"title": "No connection to the gateway or unit", "description": "Dantherm Control has been unable to connect to the configured RS485 gateway or Modbus TCP unit for more than 15 minutes. Check its power and network connection, and that the transparent TCP stream or Modbus TCP is still active. Open the integration's options if the address has changed."},
     "hac1_disconnected": {"title": "HAC1 indoor-climate module not responding", "description": "RS485 traffic from the Dantherm unit is still present, but the HAC1 module (CO2/indoor climate) has not reported itself as connected for more than 15 minutes. Check the HAC1 module's wiring and power."}
   },

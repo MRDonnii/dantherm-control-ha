@@ -1,11 +1,16 @@
 """Base entity for Dantherm Control."""
 
+import logging
+import time
+
 from homeassistant.core import callback
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN, PI_DIAGNOSTIC_KEYS, main_device_model, main_device_name
 from .coordinator import PassiveLinkCoordinator
+from .runtime_memory import ORPHAN_AFTER_S
 
 MAIN_DEVICE = (DOMAIN, "hch5_mk1_hac1")
 # HA 2026.8 replaced DeviceInfo via_device (identifier) with via_device_id
@@ -168,6 +173,59 @@ class PassiveLinkEntity(CoordinatorEntity[PassiveLinkCoordinator]):
         return self.coordinator.data.get(self.key) is not None
 
 
+_LOGGER = logging.getLogger(__name__)
+ORPHAN_CHECK_INTERVAL_S = 3600
+# Only values that depend on a room the owner chose can become orphans for good
+# (the extract duct needs an extract room). Others, such as the Køl countdown,
+# are empty most of the time and must keep their registry entry.
+ORPHAN_CLEANUP_KEYS = {"extract_rooms_temperature", "extract_duct_loss_k", "extract_duct_loss_percent"}
+
+
+@callback
+def _clean_up_orphans(entry, coordinator, pending: list) -> None:
+    """Remove registry entries of deferred entities that have had no data for weeks.
+
+    Such an entity (e.g. extract duct loss after its source room was deleted)
+    would otherwise stay "restored, unavailable" for ever. Only entries that are
+    still just restored placeholders are removed, and only while the Pi is up and
+    has sent its state. If the data ever returns, the entity is created again.
+    """
+    memory = getattr(coordinator, "age_memory", None)
+    hass = getattr(coordinator, "hass", None)
+    if memory is None or hass is None or not pending:
+        return
+    now = time.time()
+    if now - memory.last_orphan_check < ORPHAN_CHECK_INTERVAL_S:
+        return
+    controller = getattr(coordinator, "controller_client", None)
+    if not (controller is not None and controller.connected and getattr(coordinator, "controller_state", None)):
+        return
+    memory.last_orphan_check = now
+    if hass.is_running and now - memory.created_at > 600:
+        memory.prune_missing(hass)
+    registry = er.async_get(hass)
+    by_unique_id = {
+        item.unique_id: item for item in er.async_entries_for_config_entry(registry, entry.entry_id)
+    }
+    for entity in list(pending):
+        if getattr(entity, "key", None) not in ORPHAN_CLEANUP_KEYS:
+            continue
+        unique_id = entity.unique_id
+        since = memory.note_missing(unique_id, now)
+        if now - since < ORPHAN_AFTER_S:
+            continue
+        item = by_unique_id.get(unique_id)
+        if item is None:
+            memory.clear_missing(unique_id)
+            continue
+        state = hass.states.get(item.entity_id)
+        if state is not None and not state.attributes.get("restored"):
+            continue  # a live entity from somewhere else: leave it alone
+        _LOGGER.info("Removing %s: no data for %d days", item.entity_id, ORPHAN_AFTER_S // 86400)
+        registry.async_remove(item.entity_id)
+        memory.clear_missing(unique_id)
+
+
 @callback
 def async_add_entities_when_ready(entry, coordinator, async_add_entities, entities) -> None:
     """Add entities now, or as soon as their first value arrives when they defer."""
@@ -181,11 +239,14 @@ def async_add_entities_when_ready(entry, coordinator, async_add_entities, entiti
     @callback
     def _add_ready() -> None:
         ready = [entity for entity in pending if entity.has_data]
-        if not ready:
-            return
+        memory = getattr(coordinator, "age_memory", None)
         for entity in ready:
             pending.remove(entity)
-        async_add_entities(ready)
+            if memory is not None:
+                memory.clear_missing(entity.unique_id)
+        if ready:
+            async_add_entities(ready)
+        _clean_up_orphans(entry, coordinator, pending)
 
     entry.async_on_unload(coordinator.async_add_listener(_add_ready))
     _add_ready()

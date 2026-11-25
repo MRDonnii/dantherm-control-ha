@@ -5,10 +5,11 @@
       "user": {"title": "Vælg forbindelse", "description": "Et HCH5 MK1 med HAC1 aflæses passivt via en transparent RS485-over-TCP-adapter eller en USB-RS485-adapter direkte i Home Assistant-maskinen; begge tilstande er read-only. Et Dantherm-anlæg med Dantherm Residential Modbus-kortet (HCH5 MKII, RCV, HCV, HCC) aflæses og styres over Modbus TCP.", "data": {"connection_type": "Forbindelsestype"}},
       "tcp": {"title": "Forbind via RS485 over TCP", "description": "Indtast adressen på adapterens rå TCP-strøm. Integrationen sender aldrig forespørgsler eller kommandoer.", "data": {"host": "Værtsnavn eller IP-adresse", "port": "TCP-port"}},
       "mk2": {"title": "Dantherm-anlæg over Modbus TCP", "description": "Forbind direkte til et Dantherm-anlæg med Dantherm Residential Modbus-kortet – HCH5 MKII, RCV, HCV eller HCC – over Modbus TCP. Du får målinger og styring af driftstilstand, ventilationstrin, bypass, filter og alarmer – uden Raspberry Pi.", "data": {"host": "IP-adresse", "port": "Port", "unit_id": "Modbus-adresse"}},
+      "reauth_confirm": {"title": "Indtast et nyt controller-token", "description": "Raspberry Pi-controlleren på {controller} accepterer ikke den gemte nøgle. Indtast controllerens token igen (det står i Dantherm WebUI).", "data": {"controller_token": "Controller API-token"}},
       "serial": {"title": "Forbind via USB-RS485", "description": "Angiv den stabile enhedssti, helst /dev/serial/by-id/.... Porten åbnes read-only i 19200 8E1, og integrationen kalder aldrig write().", "data": {"serial_port": "Seriel enhedssti"}}
     },
-    "error": {"cannot_connect": "Der blev oprettet forbindelse, men ingen gyldig Dantherm RTU-trafik blev modtaget."},
-    "abort": {"already_configured": "Denne gateway er allerede konfigureret."}
+    "error": {"invalid_auth": "Controlleren accepterer ikke denne nøgle.", "controller_cannot_connect": "Controller API kunne ikke kontaktes.", "cannot_connect": "Der blev oprettet forbindelse, men ingen gyldig Dantherm RTU-trafik blev modtaget."},
+    "abort": {"reauth_successful": "Den nye nøgle virker. Integrationen genindlæses.", "already_configured": "Denne gateway er allerede konfigureret."}
   },
   "entity": {
     "select": {"mk2_operation": {"name": "Driftstilstand", "state": {"standby": "Standby", "manual": "Manuel", "automatic": "Automatik", "week_program": "Ugeprogram", "away": "Ferie", "summer": "Sommer", "fireplace": "Pejs"}}, "mk2_fan_level": {"name": "Ventilationstrin"}, "afterheat_control_mode": {"name": "Eftervarme regulering", "state": {"pi": "Pi", "native": "HAC1"}}},
@@ -135,7 +136,8 @@
           "controller_port": "Controller API-port",
           "controller_token": "Controller API-token",
           "smart_rooms_enabled": "Brug Home Assistant-sensorer i Smart Auto",
-          "smart_input_valid_for": "Sensorinput gyldigt i (sekunder)"
+          "smart_input_valid_for": "Sensorinput gyldigt i (sekunder)",
+          "device_seen_age": "Se en sensor som levende, når dens enhed sender andre værdier (slået fra som standard)"
         }
       },
       "controller_sensors": {
@@ -195,12 +197,15 @@
       }
     },
     "error": {
+      "already_configured": "En anden Dantherm Control-indgang bruger allerede denne adresse.",
       "cannot_connect": "Forbindelsen kunne ikke valideres, eller der blev ikke modtaget gyldig Dantherm-trafik.",
       "controller_cannot_connect": "Controller API kunne ikke kontaktes eller godkende tokenet.",
       "required": "Feltet skal udfyldes for den valgte forbindelsestype."
     }
   },
   "issues": {
+    "controller_unreachable": {"title": "Ingen forbindelse til Raspberry Pi-controlleren", "description": "Home Assistant har ikke kunnet nå Dantherm Control-controlleren på Raspberry Pi i mere end 15 minutter. Ventilationen kører videre på Pi'en, men Home Assistant kan ikke styre den eller sende rumfølere. Tjek Pi'ens strøm og netværk, og at adresse og port er rigtige i integrationens indstillinger."},
+    "controller_token_rejected": {"title": "Controlleren accepterer ikke den gemte nøgle", "description": "Raspberry Pi-controlleren afviser den nøgle, der er gemt i integrationen. Åbn beskeden om integrationen under Indstillinger, og indtast nøglen igen. Den står i Dantherm WebUI."},
     "connection_lost": {"title": "Ingen forbindelse til gatewayen eller anlægget", "description": "Dantherm Control har ikke kunnet forbinde til den konfigurerede RS485-gateway eller Modbus TCP-enhed i mere end 15 minutter. Kontrollér strøm og netværk, og at den transparente TCP-strøm eller Modbus TCP stadig er aktiv. Åbn integrationens indstillinger, hvis adressen har ændret sig."},
     "hac1_disconnected": {"title": "HAC1-indeklimamodulet svarer ikke", "description": "Der er stadig RS485-trafik fra Dantherm-anlægget, men HAC1-modulet (CO₂/indeklima) har ikke rapporteret sig som forbundet i mere end 15 minutter. Kontrollér HAC1-modulets kabling og strøm."}
   },
