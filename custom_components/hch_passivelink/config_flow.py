@@ -12,7 +12,7 @@ from homeassistant.helpers import selector
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .client import Mk2Client, PassiveLinkClient, PassiveSerialClient
-from .controller_api import ControllerApiClient, ControllerRejectedError
+from .controller_api import ControllerApiClient
 from .sensor_support import (
     KIND_CO2,
     KIND_ENERGY,
@@ -209,10 +209,8 @@ class PassiveLinkConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             )
             try:
                 await client.async_probe()
-            except ControllerRejectedError:
-                errors["base"] = "invalid_auth"
             except (OSError, ConnectionError, asyncio.TimeoutError):
-                errors["base"] = "controller_cannot_connect"
+                errors["base"] = "invalid_auth" if client.auth_failed else "controller_cannot_connect"
             else:
                 return self.async_update_reload_and_abort(
                     entry,
