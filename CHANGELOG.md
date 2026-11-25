@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.9.0-beta.16
+
+- Seksten nye diagnosesensorer viser eftervarmens model, forudsigelse og ydelse (kræver Pi 1.13.0-beta.11): styringsmetode, modelstatus, forudsagt luft om 1 og 10 minutter, laveste forudsagte luft, forudsigelsesfejl, varme pr. trin, reaktionstid op og ned, forsinkelse, rettelse, effekt (kW), energi i dag (kWh, kan bruges i energioversigten) samt tid under bund, middelafvigelse og skift pr. time over 24 timer.
+- Ældre Pi-versioner sender ikke tallene: så oprettes sensorerne ikke. En sensor uden værdi vises som utilgængelig.
+- Kun aflæsning; styringen er uændret. Genstart Home Assistant efter installationen. Ændret af Claude AI.
+
+Se [release notes](docs/releases/0.9.0-beta.16.md).
+
 ## 0.9.0-beta.15
 
 - Send for hvert rum feltet `missing_sensors` med de målingstyper (`temperature`, `humidity`, `co2`, `pm25`), hvor en valgt sensor er utilgængelig, ukendt, ikke-numerisk, uden for området eller fjernet fra HA. Typer uden valgt sensor tælles ikke med, og feltet udelades, når intet mangler.

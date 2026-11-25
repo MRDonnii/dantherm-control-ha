@@ -287,6 +287,107 @@ class AfterheatControlSensor(AfterheatControlEntity, SensorEntity):
         }
 
 
+# The Pi's compact block `afterheat_ha` (Dantherm Control 1.13.0-beta.11+): the afterheat model, its
+# predictions and its performance. (key, name, path in the block, unit, device class, state class, icon, decimals)
+AFTERHEAT_MODEL_SPECS = (
+    ("algorithm", "Eftervarme styringsmetode", ("label",), None, None, None, "mdi:brain", None),
+    ("model_state", "Eftervarme modelstatus", ("model_state",), None, None, None, "mdi:school-outline", None),
+    ("air_1min", "Eftervarme forudsagt luft om 1 min", ("air_1min_c",), UnitOfTemperature.CELSIUS,
+     SensorDeviceClass.TEMPERATURE, SensorStateClass.MEASUREMENT, "mdi:thermometer-chevron-up", 1),
+    ("air_10min", "Eftervarme forudsagt luft om 10 min", ("air_10min_c",), UnitOfTemperature.CELSIUS,
+     SensorDeviceClass.TEMPERATURE, SensorStateClass.MEASUREMENT, "mdi:thermometer-chevron-up", 1),
+    ("air_lowest", "Eftervarme laveste forudsagte luft", ("air_lowest_c",), UnitOfTemperature.CELSIUS,
+     SensorDeviceClass.TEMPERATURE, SensorStateClass.MEASUREMENT, "mdi:thermometer-chevron-down", 1),
+    ("prediction_error", "Eftervarme forudsigelsesfejl", ("prediction_error_k",), "K", None,
+     SensorStateClass.MEASUREMENT, "mdi:chart-bell-curve", 2),
+    ("step_k", "Eftervarme varme pr. trin", ("step_k",), "K", None, SensorStateClass.MEASUREMENT, "mdi:stairs-up", 1),
+    ("tau_up", "Eftervarme reaktionstid op", ("tau_up_s",), UnitOfTime.SECONDS, SensorDeviceClass.DURATION,
+     SensorStateClass.MEASUREMENT, "mdi:timer-sand", 0),
+    ("tau_down", "Eftervarme reaktionstid ned", ("tau_down_s",), UnitOfTime.SECONDS, SensorDeviceClass.DURATION,
+     SensorStateClass.MEASUREMENT, "mdi:timer-sand", 0),
+    ("dead", "Eftervarme forsinkelse", ("dead_s",), UnitOfTime.SECONDS, SensorDeviceClass.DURATION,
+     SensorStateClass.MEASUREMENT, "mdi:timer-outline", 0),
+    ("offset", "Eftervarme rettelse", ("offset_k",), "K", None, SensorStateClass.MEASUREMENT, "mdi:delta", 2),
+    ("power", "Eftervarme effekt", ("heat_kw",), UnitOfPower.KILO_WATT, SensorDeviceClass.POWER,
+     SensorStateClass.MEASUREMENT, "mdi:radiator", 2),
+    ("energy_today", "Eftervarme energi i dag", ("energy_today_kwh",), UnitOfEnergy.KILO_WATT_HOUR,
+     SensorDeviceClass.ENERGY, SensorStateClass.TOTAL_INCREASING, "mdi:radiator", 2),
+    ("under_floor_24h", "Eftervarme tid under bund 24 t", ("performance", "24h", "under_percent"), PERCENTAGE, None,
+     SensorStateClass.MEASUREMENT, "mdi:thermometer-low", 1),
+    ("mean_error_24h", "Eftervarme middelafvigelse 24 t", ("performance", "24h", "mean_error_k"), "K", None,
+     SensorStateClass.MEASUREMENT, "mdi:plus-minus-variant", 2),
+    ("changes_24h", "Eftervarme skift pr. time 24 t", ("performance", "24h", "changes_per_hour"), "skift/t", None,
+     SensorStateClass.MEASUREMENT, "mdi:swap-vertical", 1),
+)
+MODEL_STATE_TEXT = {"learning": "Lærer", "ready": "Klar", "uncertain": "Usikker"}
+
+
+class AfterheatModelSensor(ControllerEntity, SensorEntity):
+    """One value of the Pi's afterheat model block; unavailable while the Pi has no value for it.
+
+    An older Pi never sends the block: the sensors are then not created at all.
+    """
+
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _unrecorded_attributes = frozenset({"hvorfor"})
+
+    def __init__(self, coordinator, field: str, name: str, path: tuple, unit, device_class, state_class,
+                 icon: str, decimals: int | None) -> None:
+        super().__init__(coordinator, f"afterheat_ha_{field}", name)
+        self._path = path
+        self._attr_native_unit_of_measurement = unit
+        self._attr_device_class = device_class
+        self._attr_state_class = state_class
+        self._attr_icon = icon
+        if decimals is not None:
+            self._attr_suggested_display_precision = decimals
+        self._text = unit is None
+
+    def _block(self) -> dict | None:
+        block = self.coordinator.controller_state.get("afterheat_ha")
+        return block if isinstance(block, dict) else None
+
+    @property
+    def controller_value(self):
+        value = self._block()
+        for step in self._path:
+            value = value.get(step) if isinstance(value, dict) else None
+        if value is None:
+            return None
+        if self._text:
+            text = MODEL_STATE_TEXT.get(value, value) if self.key.endswith("model_state") else value
+            return str(text)[:255]
+        return round(float(value), 4) if _number(value) is not None else None
+
+    @property
+    def available(self) -> bool:
+        client = getattr(self.coordinator, "controller_client", None)
+        return bool(client and client.connected and self.controller_value is not None)
+
+    @property
+    def defer_until_data(self) -> bool:
+        return True
+
+    @property
+    def has_data(self) -> bool:
+        return self._block() is not None
+
+    @property
+    def native_value(self):
+        return self.controller_value
+
+    @property
+    def extra_state_attributes(self) -> dict[str, object] | None:
+        block = self._block()
+        if block is None:
+            return None
+        if self.key == "afterheat_ha_algorithm":
+            return {"hvorfor": block.get("why")}
+        if self.key == "afterheat_ha_step_k":
+            return {"naeste_trin": block.get("step_next_k")}
+        return None
+
+
 class PassiveLinkSensor(PassiveLinkEntity, SensorEntity, RestoreEntity):
     def __init__(self, coordinator: PassiveLinkCoordinator, description: Description) -> None:
         super().__init__(coordinator, description.key)
@@ -451,4 +552,5 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
             AfterheatLevelSensor(coordinator, *spec) for spec in AFTERHEAT_LEVEL_SENSOR_SPECS
         )
         entities.append(AfterheatControlSensor(coordinator))
+        entities.extend(AfterheatModelSensor(coordinator, *spec) for spec in AFTERHEAT_MODEL_SPECS)
     async_add_entities_when_ready(entry, coordinator, async_add_entities, entities)
